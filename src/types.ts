@@ -9,6 +9,13 @@ export interface JournalMessage {
   mode?: AIMode;
 }
 
+export interface JournalLocation {
+  name: string;
+  address?: string;
+  lat: number;
+  lng: number;
+}
+
 export interface JournalInteraction {
   id: string;
   userId: string;
@@ -20,6 +27,7 @@ export interface JournalInteraction {
   summary?: string;
   tags?: string[];
   isPinned?: boolean;
+  location?: JournalLocation;
 }
 
 export interface UserProfile {

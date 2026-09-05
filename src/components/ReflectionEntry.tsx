@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import Markdown from 'react-markdown';
-import { User, Sparkles, Copy, Check, Clock } from 'lucide-react';
+import { User, Sparkles, Copy, Check, Clock, Trash2 } from 'lucide-react';
 import type { JournalMessage } from '../types';
 import { formatJournalDate } from '../utils/sanitize';
 
 interface ReflectionEntryProps {
   message: JournalMessage;
+  onDelete?: () => void;
 }
 
-export const ReflectionEntry: React.FC<ReflectionEntryProps> = ({ message }) => {
+export const ReflectionEntry: React.FC<ReflectionEntryProps> = ({ message, onDelete }) => {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
 
@@ -88,16 +89,32 @@ export const ReflectionEntry: React.FC<ReflectionEntryProps> = ({ message }) => 
           </div>
         )}
 
-        {/* Copy Button */}
+        {/* Action Toolbar */}
         <div
-          className={`mt-3 flex items-center justify-end pt-1.5 border-t ${
+          className={`mt-3 flex items-center justify-between pt-1.5 border-t ${
             isUser ? 'border-[#e5e0d8]' : 'border-[#f5f2ed]'
           }`}
         >
+          {onDelete ? (
+            <button
+              type="button"
+              id={`delete-message-btn-${message.id}`}
+              onClick={onDelete}
+              className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium text-[#8c8579] hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+              title="Delete this message turn"
+            >
+              <Trash2 className="h-3 w-3" />
+              <span>Delete Turn</span>
+            </button>
+          ) : (
+            <div />
+          )}
+
           <button
             type="button"
+            id={`copy-message-btn-${message.id}`}
             onClick={handleCopy}
-            className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium text-[#8c8579] hover:text-[#5a5a40] transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium text-[#8c8579] hover:text-[#5a5a40] hover:bg-[#f5f2ed] transition-colors cursor-pointer"
             title="Copy entry text"
           >
             {copied ? (

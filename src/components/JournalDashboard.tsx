@@ -14,8 +14,9 @@ import {
   CheckCircle2,
   ChevronRight,
   Download,
+  MapPin,
 } from 'lucide-react';
-import type { JournalInteraction, JournalMessage, AIMode, UserProfile } from '../types';
+import type { JournalInteraction, JournalMessage, AIMode, UserProfile, JournalLocation } from '../types';
 import {
   getInteractionsCollectionRef,
   saveInteractionToFirestore,
@@ -26,6 +27,9 @@ import {
 } from '../firebase/config';
 import { ReflectionEntry } from './ReflectionEntry';
 import { PromptSuggestions } from './PromptSuggestions';
+import { LocationPickerModal } from './LocationPickerModal';
+import { LocationMapCard } from './LocationMapCard';
+import { DeleteConfirmationModal } from './DeleteConfirmationModal';
 import { sanitizeInputText, formatJournalDate } from '../utils/sanitize';
 
 interface JournalDashboardProps {
@@ -49,11 +53,24 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showLocationModal, setShowLocationModal] = useState(false);
   const [failedTurn, setFailedTurn] = useState<{
     userInput: string;
     aiResponse?: string;
     modelUsed?: string;
   } | null>(null);
+
+  // Deletion modal state & notifications
+  const [deleteTarget, setDeleteTarget] = useState<{
+    type: 'entry' | 'message';
+    entryId?: string;
+    entryTitle?: string;
+    entrySubtitle?: string;
+    messageId?: string;
+  } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [failedDeleteTarget, setFailedDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [successNotification, setSuccessNotification] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -71,7 +88,8 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
       (snapshot) => {
         const list: JournalInteraction[] = [];
         snapshot.forEach((doc) => {
-          list.push(doc.data() as JournalInteraction);
+          const data = doc.data() as JournalInteraction;
+          list.push({ ...data, id: doc.id || data.id });
         });
         setInteractions(list);
         setLoadingHistory(false);
@@ -96,11 +114,80 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
     const q = searchQuery.toLowerCase().trim();
     if (!q) return true;
     const matchTitle = item.title?.toLowerCase().includes(q);
+    const matchLocation =
+      item.location?.name?.toLowerCase().includes(q) ||
+      item.location?.address?.toLowerCase().includes(q);
     const matchMessages = item.messages?.some((m) =>
       m.content?.toLowerCase().includes(q)
     );
-    return matchTitle || matchMessages;
+    return matchTitle || matchLocation || matchMessages;
   });
+
+  // Handle pinning or updating location on active session
+  const handleSaveLocation = async (newLocation: JournalLocation) => {
+    setErrorMessage(null);
+    const timestamp = new Date().toISOString();
+
+    if (!activeInteraction) {
+      const interactionId = 'int-' + Date.now();
+      const newSession: JournalInteraction = {
+        id: interactionId,
+        userId: user.uid,
+        title: `Reflection at ${newLocation.name}`,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        mode: selectedMode,
+        messages: [],
+        location: newLocation,
+      };
+      onSelectInteraction(newSession);
+      try {
+        await saveInteractionToFirestore(user.uid, newSession);
+        setSaveStatus('saved');
+      } catch (err: any) {
+        console.error('Failed to save location to Firestore:', err);
+        setSaveStatus('error');
+        setErrorMessage('Failed to save pinned location: ' + err.message);
+      }
+    } else {
+      const updated: JournalInteraction = {
+        ...activeInteraction,
+        location: newLocation,
+        updatedAt: timestamp,
+      };
+      onSelectInteraction(updated);
+      try {
+        await saveInteractionToFirestore(user.uid, updated);
+        setSaveStatus('saved');
+      } catch (err: any) {
+        console.error('Failed to update pinned location:', err);
+        setSaveStatus('error');
+        setErrorMessage('Failed to save pinned location: ' + err.message);
+      }
+    }
+  };
+
+  // Handle removing pinned location from active session
+  const handleRemoveLocation = async () => {
+    if (!activeInteraction) return;
+    setErrorMessage(null);
+    const timestamp = new Date().toISOString();
+
+    const { location: _loc, ...rest } = activeInteraction;
+    const updated: JournalInteraction = {
+      ...rest,
+      updatedAt: timestamp,
+    };
+    onSelectInteraction(updated);
+    try {
+      await saveInteractionToFirestore(user.uid, updated);
+      setSaveStatus('saved');
+    } catch (err: any) {
+      console.error('Failed to remove pinned location:', err);
+      setSaveStatus('error');
+      setErrorMessage('Failed to remove location: ' + err.message);
+    }
+  };
 
   // Handle submitting a reflection turn
   const handleSubmitEntry = async (e?: React.FormEvent) => {
@@ -179,6 +266,7 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
         updatedAt: new Date().toISOString(),
         mode: selectedMode,
         messages: finalMessages,
+        location: activeInteraction?.location,
       };
 
       // 2. Guaranteed Transaction Verification: Persist both user input and AI response to Firestore
@@ -262,21 +350,108 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
     }
   };
 
-  // Handle deleting an interaction from Firestore
-  const handleDeleteEntry = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!window.confirm('Are you sure you want to delete this journal entry?')) {
-      return;
-    }
+  // Prompt user for confirmation before deleting a journal entry
+  const promptDeleteEntry = (
+    id: string,
+    title?: string,
+    subtitle?: string,
+    e?: React.MouseEvent
+  ) => {
+    if (e) e.stopPropagation();
+    setDeleteTarget({
+      type: 'entry',
+      entryId: id,
+      entryTitle: title || 'Untitled Reflection',
+      entrySubtitle: subtitle,
+    });
+  };
+
+  // Prompt user for confirmation before deleting an individual message turn
+  const promptDeleteMessage = (messageId: string, content: string) => {
+    const preview = content.length > 90 ? content.slice(0, 90) + '...' : content;
+    setDeleteTarget({
+      type: 'message',
+      messageId,
+      entryTitle: preview,
+      entrySubtitle: 'Single reflection message turn in this session',
+    });
+  };
+
+  // Execute confirmed deletion from Firestore
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget || !user.uid) return;
+    setIsDeleting(true);
+    setErrorMessage(null);
+    setFailedDeleteTarget(null);
 
     try {
-      await deleteInteractionFromFirestore(user.uid, id);
-      if (activeInteraction?.id === id) {
+      if (deleteTarget.type === 'entry' && deleteTarget.entryId) {
+        const idToDelete = deleteTarget.entryId;
+        const titleDeleted = deleteTarget.entryTitle || 'Reflection entry';
+
+        // Optimistic UI update
+        setInteractions((prev) => prev.filter((item) => item.id !== idToDelete));
+
+        // Persistent Firestore deletion
+        await deleteInteractionFromFirestore(user.uid, idToDelete);
+
+        if (activeInteraction?.id === idToDelete) {
+          onNewReflection();
+        }
+
+        setSuccessNotification(`"${titleDeleted}" was successfully deleted.`);
+        setTimeout(() => setSuccessNotification(null), 3500);
+      } else if (deleteTarget.type === 'message' && deleteTarget.messageId && activeInteraction) {
+        const msgIdToDelete = deleteTarget.messageId;
+        const updatedMessages = (activeInteraction.messages || []).filter(
+          (m) => m.id !== msgIdToDelete
+        );
+        const updatedInteraction: JournalInteraction = {
+          ...activeInteraction,
+          messages: updatedMessages,
+          updatedAt: new Date().toISOString(),
+        };
+
+        setSaveStatus('saving');
+        await saveInteractionToFirestore(user.uid, updatedInteraction);
+        onSelectInteraction(updatedInteraction);
+        setSaveStatus('saved');
+
+        setSuccessNotification('Reflection turn was successfully removed.');
+        setTimeout(() => setSuccessNotification(null), 3000);
+      }
+
+      setDeleteTarget(null);
+    } catch (err: any) {
+      console.error('Failed to delete from Firestore:', err);
+      const msg = err?.message || 'Permission denied or network error';
+      setErrorMessage(`Failed to delete: ${msg}`);
+      if (deleteTarget.type === 'entry' && deleteTarget.entryId) {
+        setFailedDeleteTarget({
+          id: deleteTarget.entryId,
+          title: deleteTarget.entryTitle || 'Reflection entry',
+        });
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Retry failed deletion
+  const handleRetryDelete = async () => {
+    if (!failedDeleteTarget || !user.uid) return;
+    setErrorMessage(null);
+    try {
+      await deleteInteractionFromFirestore(user.uid, failedDeleteTarget.id);
+      setInteractions((prev) => prev.filter((item) => item.id !== failedDeleteTarget.id));
+      if (activeInteraction?.id === failedDeleteTarget.id) {
         onNewReflection();
       }
+      setSuccessNotification(`"${failedDeleteTarget.title}" was successfully deleted.`);
+      setFailedDeleteTarget(null);
+      setTimeout(() => setSuccessNotification(null), 3500);
     } catch (err: any) {
-      console.error('Failed to delete interaction:', err);
-      setErrorMessage('Could not delete entry: ' + err.message);
+      setErrorMessage(`Retry delete failed: ${err?.message || 'Unknown error'}`);
     }
   };
 
@@ -284,7 +459,14 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
   const handleExportMarkdown = () => {
     if (!activeInteraction || !activeInteraction.messages?.length) return;
     let md = `# ${activeInteraction.title}\n`;
-    md += `Date: ${formatJournalDate(activeInteraction.createdAt)}\n\n---\n\n`;
+    md += `Date: ${formatJournalDate(activeInteraction.createdAt)}\n`;
+    if (activeInteraction.location) {
+      md += `Location: ${activeInteraction.location.name} (${activeInteraction.location.lat.toFixed(4)}°, ${activeInteraction.location.lng.toFixed(4)}°)\n`;
+      if (activeInteraction.location.address) {
+        md += `Address: ${activeInteraction.location.address}\n`;
+      }
+    }
+    md += `\n---\n\n`;
 
     activeInteraction.messages.forEach((m) => {
       const author = m.role === 'user' ? 'You' : `Gemini (${m.modelUsed || 'Reflection'})`;
@@ -381,21 +563,38 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
 
                     <button
                       type="button"
-                      onClick={(e) => handleDeleteEntry(item.id, e)}
-                      className="opacity-0 group-hover:opacity-100 hover:text-red-600 p-0.5 text-[#8c8579] transition-opacity cursor-pointer shrink-0"
-                      title="Delete entry"
+                      id={`delete-entry-btn-${item.id}`}
+                      onClick={(e) =>
+                        promptDeleteEntry(
+                          item.id,
+                          item.title,
+                          `${formatJournalDate(item.updatedAt || item.createdAt)} • ${item.messages?.length || 0} turns`,
+                          e
+                        )
+                      }
+                      className="opacity-75 sm:opacity-0 group-hover:opacity-100 hover:opacity-100 hover:text-red-600 hover:bg-red-50 p-1 text-[#8c8579] transition-all rounded-md cursor-pointer shrink-0"
+                      title="Delete reflection entry"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
 
-                  <div className="flex items-center gap-2 text-[10px] text-[#8c8579]">
+                  <div className="flex items-center gap-2 text-[10px] text-[#8c8579] flex-wrap">
                     <span className="flex items-center gap-1">
                       <Clock className="h-2.5 w-2.5" />
                       {formatJournalDate(item.updatedAt || item.createdAt)}
                     </span>
                     <span>•</span>
                     <span className="capitalize">{item.messages?.length || 0} turns</span>
+                    {item.location && (
+                      <>
+                        <span>•</span>
+                        <span className="inline-flex items-center gap-0.5 font-medium text-[#5a5a40] max-w-[90px] truncate">
+                          <MapPin className="h-2.5 w-2.5 shrink-0" />
+                          <span className="truncate">{item.location.name}</span>
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
               );
@@ -427,6 +626,31 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Pinned Location Button / Pill */}
+            {activeInteraction?.location ? (
+              <button
+                type="button"
+                id="pinned-location-badge-btn"
+                onClick={() => setShowLocationModal(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#5a5a40]/30 bg-[#5a5a40]/10 px-2.5 py-1.5 text-xs font-semibold text-[#5a5a40] transition-colors hover:bg-[#5a5a40]/20 cursor-pointer shadow-2xs"
+                title={`Pinned Location: ${activeInteraction.location.name}`}
+              >
+                <MapPin className="h-3.5 w-3.5" />
+                <span className="max-w-[110px] truncate">{activeInteraction.location.name}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                id="pin-location-btn"
+                onClick={() => setShowLocationModal(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#e5e0d8] bg-white px-2.5 py-1.5 text-xs font-medium text-[#3d3d3d] transition-colors hover:bg-[#f5f2ed] hover:border-[#5a5a40]/40 cursor-pointer shadow-2xs"
+                title="Pin a location to this reflection"
+              >
+                <MapPin className="h-3.5 w-3.5 text-[#5a5a40]" />
+                <span className="hidden sm:inline">Pin Location</span>
+              </button>
+            )}
+
             {activeInteraction && activeInteraction.messages?.length > 0 && (
               <button
                 type="button"
@@ -440,6 +664,30 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
               </button>
             )}
 
+            {/* If viewing a saved entry or one with content, allow deleting from header */}
+            {activeInteraction &&
+              (activeInteraction.messages?.length > 0 ||
+                interactions.some((i) => i.id === activeInteraction.id)) && (
+                <button
+                  type="button"
+                  id="delete-active-entry-btn"
+                  onClick={() =>
+                    promptDeleteEntry(
+                      activeInteraction.id,
+                      activeInteraction.title,
+                      activeInteraction.messages?.length
+                        ? `${activeInteraction.messages.length} reflection turns`
+                        : undefined
+                    )
+                  }
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-white px-2.5 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 hover:border-red-300 cursor-pointer shadow-2xs"
+                  title="Delete this reflection entry"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Delete Entry</span>
+                </button>
+              )}
+
             <button
               type="button"
               id="new-session-main-btn"
@@ -451,7 +699,28 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
           </div>
         </div>
 
-        {/* Error Alert / Retry Save Banner */}
+        {/* Success Notification Banner */}
+        {successNotification && (
+          <div
+            id="workspace-success-banner"
+            className="flex items-center justify-between gap-3 border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-900 shrink-0 animate-in fade-in"
+          >
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+              <span>{successNotification}</span>
+            </div>
+            <button
+              type="button"
+              id="dismiss-success-banner-btn"
+              onClick={() => setSuccessNotification(null)}
+              className="text-emerald-700 hover:text-emerald-900 cursor-pointer text-xs font-semibold"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Error Alert / Retry Save or Delete Banner */}
         {errorMessage && (
           <div
             id="workspace-error-banner"
@@ -461,14 +730,26 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
               <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />
               <span>{errorMessage}</span>
             </div>
-            {failedTurn && (
-              <button
-                onClick={handleRetrySave}
-                className="rounded-lg bg-red-600 px-2 py-1 font-semibold text-white hover:bg-red-700 cursor-pointer shrink-0"
-              >
-                Retry Save
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {failedTurn && (
+                <button
+                  id="retry-save-banner-btn"
+                  onClick={handleRetrySave}
+                  className="rounded-lg bg-red-600 px-2 py-1 font-semibold text-white hover:bg-red-700 cursor-pointer shrink-0"
+                >
+                  Retry Save
+                </button>
+              )}
+              {failedDeleteTarget && (
+                <button
+                  id="retry-delete-banner-btn"
+                  onClick={handleRetryDelete}
+                  className="rounded-lg bg-red-600 px-2 py-1 font-semibold text-white hover:bg-red-700 cursor-pointer shrink-0"
+                >
+                  Retry Delete
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -479,6 +760,16 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
         >
           {(!activeInteraction || !activeInteraction.messages?.length) ? (
             <div className="flex flex-col items-center justify-center py-12 text-center max-w-md mx-auto space-y-4">
+              {activeInteraction?.location && (
+                <div className="w-full text-left mb-2">
+                  <LocationMapCard
+                    location={activeInteraction.location}
+                    onEdit={() => setShowLocationModal(true)}
+                    onRemove={handleRemoveLocation}
+                  />
+                </div>
+              )}
+
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#f5f2ed] border border-[#e5e0d8] text-[#5a5a40]">
                 <Sparkles className="h-6 w-6" />
               </div>
@@ -504,8 +795,20 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
             </div>
           ) : (
             <div className="space-y-5 max-w-3xl mx-auto">
+              {activeInteraction?.location && (
+                <LocationMapCard
+                  location={activeInteraction.location}
+                  onEdit={() => setShowLocationModal(true)}
+                  onRemove={handleRemoveLocation}
+                />
+              )}
+
               {activeInteraction.messages.map((message) => (
-                <ReflectionEntry key={message.id} message={message} />
+                <ReflectionEntry
+                  key={message.id}
+                  message={message}
+                  onDelete={() => promptDeleteMessage(message.id, message.content)}
+                />
               ))}
 
               {isGenerating && (
@@ -576,7 +879,20 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
                 </button>
               </div>
 
-              <div className="flex items-center gap-3 text-[11px] text-[#8c8579]">
+              <div className="flex items-center gap-2.5 text-[11px] text-[#8c8579]">
+                <button
+                  type="button"
+                  id="composer-pin-location-btn"
+                  onClick={() => setShowLocationModal(true)}
+                  className="inline-flex items-center gap-1 text-[#5a5a40] hover:text-[#3d3d3d] hover:underline cursor-pointer"
+                  title="Pin or change location"
+                >
+                  <MapPin className="h-3 w-3" />
+                  <span className="max-w-[120px] truncate">
+                    {activeInteraction?.location ? activeInteraction.location.name : 'Pin location'}
+                  </span>
+                </button>
+                <span>•</span>
                 <span>{wordCount} words</span>
                 <span>•</span>
                 <span>{inputText.length}/20,000 chars</span>
@@ -640,6 +956,33 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
           </div>
         </div>
       </main>
+
+      {/* Location Picker & Google Maps Integration Modal */}
+      <LocationPickerModal
+        isOpen={showLocationModal}
+        currentLocation={activeInteraction?.location}
+        onSave={handleSaveLocation}
+        onRemove={activeInteraction?.location ? handleRemoveLocation : undefined}
+        onClose={() => setShowLocationModal(false)}
+      />
+
+      {/* Custom Resilient Delete Confirmation Modal (Bypasses iframe window.confirm restriction) */}
+      <DeleteConfirmationModal
+        isOpen={Boolean(deleteTarget)}
+        title={deleteTarget?.type === 'entry' ? 'Delete Reflection Entry' : 'Delete Reflection Turn'}
+        itemTitle={deleteTarget?.entryTitle}
+        itemSubtitle={deleteTarget?.entrySubtitle}
+        warningText={
+          deleteTarget?.type === 'entry'
+            ? 'This will permanently delete this reflection session and all its messages from your personal Firestore storage. This action cannot be undone.'
+            : 'This will permanently remove this reflection turn and sync your saved entry in Firestore.'
+        }
+        isDeleting={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          if (!isDeleting) setDeleteTarget(null);
+        }}
+      />
     </div>
   );
 };

@@ -13,6 +13,7 @@ A secure, user-authenticated personal reflection and journaling web application 
 | **AI Processing Engine** | Gemini 3.6 Flash API | Server-side reflection, brainstorming, and summarization with a multi-model fallback ladder. |
 | **Secret Management** | Google Cloud Secret Manager | Stores `GEMINI_API_KEY` securely without client exposure or hardcoded keys. |
 | **Hosting & Container** | Google Cloud Run | Scalable, containerized deployment running Node.js + Express with embedded Vite middleware. |
+| **Location & Maps Integration** | Google Maps Platform (`@vis.gl/react-google-maps`) | Location-aware journal pins, interactive map previews (`AdvancedMarker`, `Pin`), attribution channel `gmp_mcp_codeassist_v1_aistudio`, zero hardcoded keys. |
 
 ---
 
@@ -20,11 +21,11 @@ A secure, user-authenticated personal reflection and journaling web application 
 
 | Threat Zone | Threat Scenario | Countermeasure & Defensive Control |
 | :--- | :--- | :--- |
-| **Input Surfaces** | Malicious injection payloads, oversized inputs, XSS attempts in reflections. | Server & client text validation, max length limits (20,000 chars), defensive sanitization, zero raw HTML execution. |
+| **Input Surfaces** | Malicious injection payloads, oversized inputs, XSS attempts in reflections or location fields. | Server & client text validation, max length limits (20,000 chars), defensive sanitization, zero raw HTML execution, coordinate validation. |
 | **Planning & Reasoning** | Indirect prompt injection via journal reflections attempting system bypass. | Plain data framing (`OWASP LLM01`), strict system instructions treating inputs purely as reflective text, resilient model ladder. |
 | **Tool Execution** | Unauthorized API calls, SSRF, or key leakage in browser dev tools. | Server-side Gemini API proxy (`/api/reflect`), top-level request body parsing guarantee, zero client-side API secrets. |
-| **Memory & State** | Cross-user data leaks or unauthorized Firestore reads/writes. | Owner-bound Firestore security rules (`request.auth.uid == userId`), strict undefined-stripping payload hygiene. |
-| **Inter-System Communication** | Key exfiltration or token tampering in transit. | HTTPS/TLS transport, dynamic Secret Manager secret ingestion, Bearer token integrity checks. |
+| **Memory & State** | Cross-user data leaks or unauthorized Firestore reads/writes. | Owner-bound Firestore security rules (`request.auth.uid == userId`), strict undefined-stripping payload hygiene, location persistence isolation. |
+| **Inter-System Communication** | Key exfiltration, token tampering in transit, or Google Maps Platform quota abuse. | HTTPS/TLS transport, dynamic Secret Manager secret ingestion, Bearer token integrity checks, solution channel attribution ID, HTTP referrer key restrictions. |
 
 ---
 
@@ -202,3 +203,20 @@ The following manual test walkthrough exercises all visible components and user 
 ### Test Case 9: Sign Out
 - **Step 9.1**: Click the **"Sign Out"** button in the header.
 - **Expected Outcome**: User session is destroyed; user is redirected back to the landing page.
+
+### Test Case 10: Location-Aware Entries (Google Maps Platform Integration)
+- **Step 10.1**: In the workspace toolbar or composer, click the **"Pin Location"** button.
+- **Expected Outcome**: The **"Pin Location to Reflection"** modal dialog opens. The modal shows preset contemplative sanctuaries (Kyoto Bamboo Grove, Big Sur Coastline, Walden Pond, Lake Como, etc.), custom coordinate input fields, and a live map or coordinate preview with the mandatory solution channel attribution `gmp_mcp_codeassist_v1_aistudio`.
+- **Step 10.2**: Select one of the preset locations (e.g., "Kyoto Zen Bamboo Grove") or click "Use Current Location" to test browser GPS integration.
+- **Expected Outcome**: The location selection updates with name, coordinates, and address.
+- **Step 10.3**: Click **"Pin to Reflection"**.
+- **Expected Outcome**:
+  1. The modal closes.
+  2. The toolbar updates to show the pinned location badge pill (e.g., `📍 Kyoto Zen Bamboo Grove`).
+  3. The message area renders the interactive **Location Map Card** showcasing the pinned spot, coordinates, "Google Maps" external link, and the interactive map preview.
+  4. The pinned location is persisted to Cloud Firestore under the user's isolated document.
+  5. The sidebar history list displays the location pin next to the entry timestamp.
+- **Step 10.4**: Click **"Export"** to download the Markdown file.
+- **Expected Outcome**: The downloaded `.md` file contains the pinned location name, coordinates, and address at the top of the exported transcript.
+- **Step 10.5**: Click the edit or remove button on the Location Map Card to test updating or clearing the location pin.
+- **Expected Outcome**: Removing updates Firestore immediately and removes the badge from the toolbar and card from the message stream.
