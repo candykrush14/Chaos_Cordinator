@@ -161,7 +161,7 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
       try {
         await saveInteractionToFirestore(user.uid, newSession);
         setSaveStatus('saved');
-        emitReflectionEvent('reflection.located', interactionId);
+        emitReflectionEvent('reflection.located', interactionId, newSession);
       } catch (err: any) {
         console.error('Failed to save location to Firestore:', err);
         setSaveStatus('error');
@@ -177,7 +177,7 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
       try {
         await saveInteractionToFirestore(user.uid, updated);
         setSaveStatus('saved');
-        emitReflectionEvent('reflection.located', updated.id);
+        emitReflectionEvent('reflection.located', updated.id, updated);
       } catch (err: any) {
         console.error('Failed to update pinned location:', err);
         setSaveStatus('error');
@@ -201,7 +201,7 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
     try {
       await saveInteractionToFirestore(user.uid, updated);
       setSaveStatus('saved');
-      emitReflectionEvent('reflection.updated', updated.id);
+      emitReflectionEvent('reflection.updated', updated.id, updated);
     } catch (err: any) {
       console.error('Failed to remove pinned location:', err);
       setSaveStatus('error');
@@ -300,7 +300,8 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
         setFailedTurn(null);
         emitReflectionEvent(
           isNewSession ? 'reflection.created' : 'reflection.updated',
-          interactionId
+          interactionId,
+          interactionToSave
         );
       } catch (dbError: any) {
         console.error('Firestore save failed:', dbError);
@@ -413,12 +414,13 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
       if (deleteTarget.type === 'entry' && deleteTarget.entryId) {
         const idToDelete = deleteTarget.entryId;
         const titleDeleted = deleteTarget.entryTitle || 'Reflection entry';
+        const entryBeingDeleted = interactions.find((item) => item.id === idToDelete);
 
         // Optimistic UI update
         setInteractions((prev) => prev.filter((item) => item.id !== idToDelete));
 
         // Notify integrations while the document still exists, then delete.
-        await emitReflectionEventAndWait('reflection.deleted', idToDelete);
+        await emitReflectionEventAndWait('reflection.deleted', idToDelete, 5000, entryBeingDeleted);
 
         // Persistent Firestore deletion
         await deleteInteractionFromFirestore(user.uid, idToDelete);

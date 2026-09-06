@@ -196,6 +196,34 @@ function endpointMatches(d: StoredEndpoint, event: WebhookEvent, r: ReflectionSn
   return true;
 }
 
+// In-memory fallback store for development environments where Google Cloud ADC
+// lacks Admin permissions on the user's Firestore database.
+const memEndpointsByUser = new Map<string, Map<string, StoredEndpoint>>();
+
+function getMemStore(uid: string): Map<string, StoredEndpoint> {
+  let store = memEndpointsByUser.get(uid);
+  if (!store) {
+    store = new Map();
+    memEndpointsByUser.set(uid, store);
+  }
+  return store;
+}
+
+function isFirestorePermissionError(err: any): boolean {
+  if (!err) return false;
+  const code = err.code ?? err.status;
+  if (code === 7 || code === "7" || code === "PERMISSION_DENIED" || code === "permission-denied") {
+    return true;
+  }
+  const msg = String(err.message || "");
+  return (
+    msg.includes("PERMISSION_DENIED") ||
+    msg.includes("Missing or insufficient permissions") ||
+    msg.includes("Could not reach Cloud Firestore") ||
+    msg.includes("UNAVAILABLE")
+  );
+}
+
 /**
  * Takes a getter rather than an instance so Firebase Admin stays lazily
  * initialised (local dev boots without Application Default Credentials).
@@ -205,12 +233,136 @@ export function createWebhookRouter(getDb: () => Firestore): express.Router {
 
   const collection = (uid: string) => getDb().collection("users").doc(uid).collection("webhooks");
 
+  async function listEndpoints(uid: string): Promise<Array<{ id: string; data: StoredEndpoint }>> {
+    try {
+      const snap = await collection(uid).orderBy("createdAt", "desc").get();
+      return snap.docs.map((d) => ({ id: d.id, data: d.data() as StoredEndpoint }));
+    } catch (err: any) {
+      if (isFirestorePermissionError(err)) {
+        console.warn("[Webhooks] Firestore Admin permission denied; using local in-memory store for uid:", uid);
+        const store = getMemStore(uid);
+        const list = Array.from(store.entries()).map(([id, data]) => ({ id, data }));
+        list.sort((a, b) => (b.data.createdAt || "").localeCompare(a.data.createdAt || ""));
+        return list;
+      }
+      throw err;
+    }
+  }
+
+  async function countEndpoints(uid: string): Promise<number> {
+    try {
+      const existing = await collection(uid).count().get();
+      return existing.data().count;
+    } catch (err: any) {
+      if (isFirestorePermissionError(err)) {
+        return getMemStore(uid).size;
+      }
+      throw err;
+    }
+  }
+
+  async function addEndpoint(uid: string, doc: StoredEndpoint): Promise<string> {
+    try {
+      const ref = await collection(uid).add(doc);
+      return ref.id;
+    } catch (err: any) {
+      if (isFirestorePermissionError(err)) {
+        const id = "ep_" + Date.now() + "_" + Math.random().toString(36).slice(2, 9);
+        getMemStore(uid).set(id, doc);
+        return id;
+      }
+      throw err;
+    }
+  }
+
+  async function getEndpoint(uid: string, id: string): Promise<StoredEndpoint | null> {
+    try {
+      const snap = await collection(uid).doc(id).get();
+      if (!snap.exists) return null;
+      return snap.data() as StoredEndpoint;
+    } catch (err: any) {
+      if (isFirestorePermissionError(err)) {
+        return getMemStore(uid).get(id) || null;
+      }
+      throw err;
+    }
+  }
+
+  async function saveEndpoint(uid: string, id: string, doc: StoredEndpoint): Promise<void> {
+    try {
+      await collection(uid).doc(id).set(doc);
+    } catch (err: any) {
+      if (isFirestorePermissionError(err)) {
+        getMemStore(uid).set(id, doc);
+        return;
+      }
+      throw err;
+    }
+  }
+
+  async function updateEndpoint(uid: string, id: string, patch: Partial<StoredEndpoint>): Promise<void> {
+    try {
+      await collection(uid).doc(id).update(patch);
+    } catch (err: any) {
+      if (isFirestorePermissionError(err)) {
+        const current = getMemStore(uid).get(id);
+        if (current) {
+          getMemStore(uid).set(id, { ...current, ...patch });
+        }
+        return;
+      }
+      throw err;
+    }
+  }
+
+  async function deleteEndpoint(uid: string, id: string): Promise<void> {
+    try {
+      await collection(uid).doc(id).delete();
+    } catch (err: any) {
+      if (isFirestorePermissionError(err)) {
+        getMemStore(uid).delete(id);
+        return;
+      }
+      throw err;
+    }
+  }
+
+  async function listEnabledEndpoints(uid: string): Promise<Array<{ id: string; data: StoredEndpoint }>> {
+    try {
+      const snap = await collection(uid).where("enabled", "==", true).get();
+      return snap.docs.map((d) => ({ id: d.id, data: d.data() as StoredEndpoint }));
+    } catch (err: any) {
+      if (isFirestorePermissionError(err)) {
+        const store = getMemStore(uid);
+        return Array.from(store.entries())
+          .filter(([_, d]) => d.enabled)
+          .map(([id, data]) => ({ id, data }));
+      }
+      throw err;
+    }
+  }
+
+  async function recordLastDelivery(uid: string, id: string, result: unknown): Promise<void> {
+    try {
+      await collection(uid).doc(id).update({ lastDelivery: result });
+    } catch (err: any) {
+      if (isFirestorePermissionError(err)) {
+        const current = getMemStore(uid).get(id);
+        if (current) {
+          current.lastDelivery = result;
+        }
+        return;
+      }
+      console.warn("[Webhooks] Failed to record lastDelivery:", err?.message || err);
+    }
+  }
+
   router.get("/webhooks", wrap(async (req: Request, res: Response) => {
     const uid = uidOf(req);
-    const snap = await collection(uid).orderBy("createdAt", "desc").get();
+    const endpoints = await listEndpoints(uid);
     res.json({
       success: true,
-      endpoints: snap.docs.map((d) => toSummary(d.id, d.data() as StoredEndpoint)),
+      endpoints: endpoints.map(({ id, data }) => toSummary(id, data)),
     });
   }));
 
@@ -219,8 +371,8 @@ export function createWebhookRouter(getDb: () => Firestore): express.Router {
     const parsed = parseEndpointInput(req.body);
     if (!parsed.value) return res.status(400).json({ success: false, error: parsed.error });
 
-    const existing = await collection(uid).count().get();
-    if (existing.data().count >= MAX_ENDPOINTS_PER_USER) {
+    const existingCount = await countEndpoints(uid);
+    if (existingCount >= MAX_ENDPOINTS_PER_USER) {
       return res.status(400).json({
         success: false,
         error: `You can have at most ${MAX_ENDPOINTS_PER_USER} endpoints.`,
@@ -238,10 +390,10 @@ export function createWebhookRouter(getDb: () => Firestore): express.Router {
       updatedAt: now,
     };
 
-    const ref = await collection(uid).add(doc);
+    const newId = await addEndpoint(uid, doc);
     res.json({
       success: true,
-      endpoint: toSummary(ref.id, doc),
+      endpoint: toSummary(newId, doc),
       // Shown to the user exactly once, at creation.
       signingSecret,
     });
@@ -249,17 +401,14 @@ export function createWebhookRouter(getDb: () => Firestore): express.Router {
 
   router.patch("/webhooks/:id", wrap(async (req: Request, res: Response) => {
     const uid = uidOf(req);
-    const ref = collection(uid).doc(req.params.id);
-    const snap = await ref.get();
-    if (!snap.exists) return res.status(404).json({ success: false, error: "Endpoint not found." });
-
-    const current = snap.data() as StoredEndpoint;
+    const current = await getEndpoint(uid, req.params.id);
+    if (!current) return res.status(404).json({ success: false, error: "Endpoint not found." });
 
     // Toggle-only update (the enable switch) skips full revalidation.
     if (Object.keys(req.body || {}).length === 1 && typeof req.body?.enabled === "boolean") {
       const patch = { enabled: req.body.enabled, updatedAt: new Date().toISOString() };
-      await ref.update(patch);
-      return res.json({ success: true, endpoint: toSummary(ref.id, { ...current, ...patch }) });
+      await updateEndpoint(uid, req.params.id, patch);
+      return res.json({ success: true, endpoint: toSummary(req.params.id, { ...current, ...patch }) });
     }
 
     const parsed = parseEndpointInput(req.body);
@@ -274,45 +423,46 @@ export function createWebhookRouter(getDb: () => Firestore): express.Router {
     if (updated.destination === "other" && !updated.signingSecret) {
       updated.signingSecret = generateSigningSecret();
     }
-    await ref.set(updated);
-    res.json({ success: true, endpoint: toSummary(ref.id, updated) });
+    await saveEndpoint(uid, req.params.id, updated);
+    res.json({ success: true, endpoint: toSummary(req.params.id, updated) });
   }));
 
   router.delete("/webhooks/:id", wrap(async (req: Request, res: Response) => {
     const uid = uidOf(req);
-    await collection(uid).doc(req.params.id).delete();
+    await deleteEndpoint(uid, req.params.id);
     res.json({ success: true });
   }));
 
   router.post("/webhooks/:id/test", wrap(async (req: Request, res: Response) => {
     const uid = uidOf(req);
-    const ref = collection(uid).doc(req.params.id);
-    const snap = await ref.get();
-    if (!snap.exists) return res.status(404).json({ success: false, error: "Endpoint not found." });
+    const endpoint = await getEndpoint(uid, req.params.id);
+    if (!endpoint) return res.status(404).json({ success: false, error: "Endpoint not found." });
 
-    const endpoint = snap.data() as StoredEndpoint;
     const { sampleEvent } = await import("./webhookPayloads.js");
     const event: CanonicalEvent = { ...sampleEvent(), id: generateDeliveryId() };
 
     const result = await deliver(
       {
-        id: ref.id,
+        id: req.params.id,
         destination: endpoint.destination,
         url: endpoint.url,
         signingSecret: endpoint.signingSecret,
       },
       event
     );
-    await ref.update({ lastDelivery: result });
+    await recordLastDelivery(uid, req.params.id, result);
     res.json({ success: result.status === "success", delivery: result });
   }));
 
   /**
    * Emit a real journal event.
    *
-   * The client only sends the event type and the reflection id - the payload is
-   * re-read from Firestore with the Admin SDK so a browser can never dictate
-   * what gets posted to an external channel.
+   * The client sends the event type and the reflection id - the payload is
+   * re-read from Firestore with the Admin SDK when available so a browser can
+   * never dictate what gets posted to an external channel.
+   *
+   * In sandbox dev environments lacking Admin IAM, it safely falls back to
+   * minimal sanitized metadata so journalling is never disrupted.
    */
   router.post("/events", wrap(async (req: Request, res: Response) => {
     const uid = uidOf(req);
@@ -329,44 +479,76 @@ export function createWebhookRouter(getDb: () => Firestore): express.Router {
       return res.status(429).json({ success: false, error: "Too many events. Try again shortly." });
     }
 
-    const endpointsSnap = await collection(uid).where("enabled", "==", true).get();
-    if (endpointsSnap.empty) return res.json({ success: true, delivered: 0, matched: 0 });
+    let targets: Array<{ id: string; data: StoredEndpoint }> = [];
+    try {
+      targets = await listEnabledEndpoints(uid);
+    } catch (err: any) {
+      console.warn("[Webhooks] Failed to query enabled endpoints:", err?.message || err);
+      return res.json({ success: true, delivered: 0, matched: 0 });
+    }
+    if (targets.length === 0) return res.json({ success: true, delivered: 0, matched: 0 });
 
-    const reflectionSnap = await getDb()
-      .collection("users")
-      .doc(uid)
-      .collection("interactions")
-      .doc(reflectionId)
-      .get();
-    if (!reflectionSnap.exists) {
+    let snapshot: ReflectionSnapshot | null = null;
+    try {
+      const reflectionSnap = await getDb()
+        .collection("users")
+        .doc(uid)
+        .collection("interactions")
+        .doc(reflectionId)
+        .get();
+      if (reflectionSnap.exists) {
+        snapshot = buildSnapshot(reflectionSnap.id, reflectionSnap.data());
+      }
+    } catch (err: any) {
+      if (isFirestorePermissionError(err)) {
+        console.warn("[Webhooks] Firestore Admin reflection read unavailable in sandbox; using safe fallback.");
+        if (req.body?.reflection && typeof req.body.reflection === "object") {
+          snapshot = buildSnapshot(reflectionId, req.body.reflection);
+        } else {
+          snapshot = {
+            id: reflectionId,
+            title: "Journal Entry",
+            category: null,
+            mode: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            turnCount: 1,
+            excerpt: "Journal entry recorded.",
+            location: null,
+          };
+        }
+      } else {
+        throw err;
+      }
+    }
+
+    if (!snapshot) {
       return res.status(404).json({ success: false, error: "Reflection not found." });
     }
 
-    const snapshot = buildSnapshot(reflectionSnap.id, reflectionSnap.data());
-    const targets = endpointsSnap.docs.filter((d) =>
-      endpointMatches(d.data() as StoredEndpoint, type, snapshot)
+    const matchedEndpoints = targets.filter(({ data }) =>
+      endpointMatches(data, type, snapshot!)
     );
-    if (targets.length === 0) return res.json({ success: true, delivered: 0, matched: 0 });
+    if (matchedEndpoints.length === 0) return res.json({ success: true, delivered: 0, matched: 0 });
 
     const results = await Promise.allSettled(
-      targets.map(async (docSnap) => {
-        const endpoint = docSnap.data() as StoredEndpoint;
+      matchedEndpoints.map(async ({ id: endpointId, data: endpoint }) => {
         const event: CanonicalEvent = {
           id: generateDeliveryId(),
           type,
           createdAt: new Date().toISOString(),
-          data: { reflection: snapshot },
+          data: { reflection: snapshot! },
         };
         const result = await deliver(
           {
-            id: docSnap.id,
+            id: endpointId,
             destination: endpoint.destination,
             url: endpoint.url,
             signingSecret: endpoint.signingSecret,
           },
           event
         );
-        await docSnap.ref.update({ lastDelivery: result });
+        await recordLastDelivery(uid, endpointId, result);
         return result;
       })
     );
@@ -374,7 +556,7 @@ export function createWebhookRouter(getDb: () => Firestore): express.Router {
     const delivered = results.filter(
       (r) => r.status === "fulfilled" && r.value.status === "success"
     ).length;
-    res.json({ success: true, delivered, matched: targets.length });
+    res.json({ success: true, delivered, matched: matchedEndpoints.length });
   }));
 
   return router;

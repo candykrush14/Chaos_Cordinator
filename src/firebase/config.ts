@@ -8,6 +8,7 @@ import {
   type User,
 } from 'firebase/auth';
 import {
+  initializeFirestore,
   getFirestore,
   collection,
   doc,
@@ -40,10 +41,15 @@ googleProvider.setCustomParameters({
   prompt: 'select_account',
 });
 
-// Initialize Firestore pointing to the provisioned database
-export const db: Firestore = firebaseConfig.firestoreDatabaseId
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
+// Initialize Firestore pointing to the provisioned database with auto-detect long-polling
+// to ensure stable connectivity within iframe and proxied preview environments.
+export const db: Firestore = initializeFirestore(
+  app,
+  {
+    experimentalAutoDetectLongPolling: true,
+  },
+  firebaseConfig.firestoreDatabaseId || undefined
+);
 
 // Authentication helper with user-friendly popup handling
 export async function signInWithGoogle(): Promise<User> {

@@ -13,9 +13,8 @@ import { createWebhookRouter } from "./server/webhookRoutes.js";
 dotenv.config();
 
 const app = express();
-// Cloud Run injects PORT (expects the container to listen on it). Fall back to
-// 8080 (Cloud Run's default) so a misconfigured deploy still works.
-const PORT = Number(process.env.PORT) || 8080;
+// Environment constraint: port 3000 is required by the reverse proxy infrastructure
+const PORT = 3000;
 const IS_PROD = process.env.NODE_ENV === "production";
 
 // 1. Top-Level Request Deserialization (Ordering Guarantee)

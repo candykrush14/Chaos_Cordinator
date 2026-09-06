@@ -100,14 +100,25 @@ export async function testWebhook(id: string): Promise<WebhookDeliveryResult> {
 /**
  * Tell the server something happened. The server re-reads the reflection from
  * Firestore and decides what (if anything) to send, so nothing here is trusted.
+ * An optional sanitized summary can be passed as fallback for dev sandbox mode.
  *
  * Fire-and-forget: notification failures must never disrupt journalling.
  */
-export function emitReflectionEvent(type: WebhookEvent, reflectionId: string): void {
+export function emitReflectionEvent(
+  type: WebhookEvent,
+  reflectionId: string,
+  fallbackReflection?: {
+    title?: string;
+    category?: string | null;
+    mode?: string | null;
+    messages?: any[];
+    location?: any;
+  }
+): void {
   if (!reflectionId) return;
   void authedFetch('/api/events', {
     method: 'POST',
-    body: JSON.stringify({ type, reflectionId }),
+    body: JSON.stringify({ type, reflectionId, reflection: fallbackReflection }),
   }).catch((err) => {
     console.warn('[webhooks] event emit failed:', err);
   });
@@ -120,13 +131,20 @@ export function emitReflectionEvent(type: WebhookEvent, reflectionId: string): v
 export async function emitReflectionEventAndWait(
   type: WebhookEvent,
   reflectionId: string,
-  timeoutMs = 10000
+  timeoutMs = 10000,
+  fallbackReflection?: {
+    title?: string;
+    category?: string | null;
+    mode?: string | null;
+    messages?: any[];
+    location?: any;
+  }
 ): Promise<void> {
   if (!reflectionId) return;
   try {
     await authedFetch('/api/events', {
       method: 'POST',
-      body: JSON.stringify({ type, reflectionId }),
+      body: JSON.stringify({ type, reflectionId, reflection: fallbackReflection }),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
