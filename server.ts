@@ -14,7 +14,9 @@ dotenv.config();
 
 const app = express();
 // Environment constraint: port 3000 is required by the reverse proxy infrastructure
-const PORT = 3000;
+// Cloud Run injects PORT and requires the container to listen on it. Falling
+// back to 3000 keeps the documented local dev URL working.
+const PORT = Number(process.env.PORT) || 3000;
 const IS_PROD = process.env.NODE_ENV === "production";
 
 // 1. Top-Level Request Deserialization (Ordering Guarantee)

@@ -17,6 +17,7 @@ import { LocationsMapView } from './components/LocationsMapView';
 import { ProfileView } from './components/ProfileView';
 import { AdminDashboard } from './components/AdminDashboard';
 import { SharedReflectionsView } from './components/SharedReflectionsView';
+import { DiscoverMeView } from './components/DiscoverMeView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import type { UserProfile, JournalInteraction, UserRole, AppView } from './types';
 import { getEffectiveUserRole } from './utils/rbac';
@@ -153,6 +154,8 @@ export default function App() {
             ? 'the admin dashboard'
             : view === 'shared'
             ? 'the shared reflections'
+            : view === 'discover'
+            ? 'your Discover Me report'
             : 'your journal'
         }
       >
@@ -179,6 +182,8 @@ export default function App() {
             }}
             onBackToJournal={() => setView('journal')}
           />
+        ) : view === 'discover' ? (
+          <DiscoverMeView user={user} onBackToJournal={() => setView('journal')} />
         ) : view === 'admin' ? (
           <AdminDashboard
             currentUser={user}
