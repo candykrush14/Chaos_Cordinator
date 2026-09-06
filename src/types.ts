@@ -1,3 +1,67 @@
+export type AppView = 'journal' | 'locations' | 'shared' | 'discover' | 'admin' | 'profile';
+
+export interface EmotionMetric {
+  name: string;
+  score: number; // 0 to 100
+  color: string;
+  tendency: 'increasing' | 'steady' | 'decreasing';
+  description: string;
+}
+
+export interface HealthyLivingPillar {
+  id: 'sleep' | 'vitality' | 'mindfulness' | 'connection';
+  title: string;
+  score: number; // 0 to 100
+  status: 'thriving' | 'balanced' | 'needs_attention';
+  insight: string;
+  action: string;
+}
+
+export interface DailyNudge {
+  id: string;
+  text: string;
+  completed: boolean;
+  points: number;
+  category: 'mindfulness' | 'vitality' | 'rest' | 'connection';
+}
+
+export interface WellnessPointsRecord {
+  totalPoints: number;
+  level: string;
+  streakDays: number;
+  recentBadges: string[];
+  lastHappinessIndex?: number;
+  pointsHistory: {
+    id: string;
+    reason: string;
+    points: number;
+    timestamp: string;
+  }[];
+}
+
+export interface DiscoverMeAnalysis {
+  id: string;
+  userId: string;
+  generatedAt: string;
+  emotionGist: string;
+  primaryMood: string;
+  secondaryMood?: string;
+  emotions: EmotionMetric[];
+  therapyMessage: {
+    title: string;
+    content: string;
+    dailyMotivation: string;
+    mindfulAffirmation: string;
+  };
+  happinessIndex: number; // 0 - 100
+  happinessDelta: number; // e.g. +8, -3, +15
+  happinessTrend: 'improving' | 'steady' | 'fluctuating' | 'dipping';
+  pointsAwarded: number;
+  healthyLivingPillars: HealthyLivingPillar[];
+  dailyNudges: DailyNudge[];
+  entriesAnalyzedCount: number;
+}
+
 export type AIMode = 'reflection' | 'summary' | 'brainstorm';
 
 export const AI_MODES: { id: AIMode; label: string }[] = [
@@ -52,6 +116,61 @@ export interface JournalInteraction {
   location?: JournalLocation;
 }
 
+export type UserRole = 'admin' | 'editor' | 'user';
+
+export interface UserRoleRecord {
+  uid: string;
+  email: string | null;
+  displayName?: string | null;
+  role: UserRole;
+  assignedAt: string;
+  assignedBy: string;
+}
+
+export type SharePermission = 'viewer' | 'editor';
+
+export interface ReflectionShare {
+  id: string;
+  reflectionId: string;
+  reflectionTitle: string;
+  ownerId: string;
+  ownerEmail: string | null;
+  ownerName?: string | null;
+  targetEmail: string;
+  targetUserId?: string | null;
+  permission: SharePermission;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminTelemetry {
+  totalUsers: number;
+  totalReflections: number;
+  totalShares: number;
+  totalEndpoints: number;
+  activeAdminsCount: number;
+  modelAvailability: {
+    primary: string;
+    status: 'operational' | 'degraded';
+    latencyMs: number;
+  };
+  securityAudit: {
+    rbacEnforced: boolean;
+    zeroInsecureDefaults: boolean;
+    ownerBoundIsolated: boolean;
+    aiDirectiveActive: boolean;
+  };
+}
+
+export interface SecurityAuditCheck {
+  id: string;
+  title: string;
+  category: 'RBAC' | 'AI_DIRECTIVE' | 'LEAST_PRIVILEGE' | 'STATE_INTEGRITY';
+  passed: boolean;
+  description: string;
+  recommendation: string;
+}
+
 export interface UserProfile {
   uid: string;
   email: string | null;
@@ -60,6 +179,7 @@ export interface UserProfile {
   providerId?: string | null;
   createdAt?: string | null;
   lastSignInAt?: string | null;
+  role?: UserRole;
 }
 
 /* ---------------------------------------------------------------------------

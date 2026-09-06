@@ -72,17 +72,57 @@ gcloud firestore databases create --location=nam5 --type=firestore-native
 ```
 
 ### 2.2 Deploy Firestore Security Rules
-Ensure your `firestore.rules` file enforces owner-bound user isolation:
+Ensure your `firestore.rules` file enforces owner-bound user isolation, RBAC checks, and shared access boundaries:
 
 ```javascript
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    function getUserRole() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/roles/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.role
+        : 'user';
+    }
+    function isAdmin() {
+      return isAuthenticated() && (
+        getUserRole() == 'admin' ||
+        request.auth.token.email == 'shreyasrivastava0407@gmail.com'
+      );
+    }
+    function isValidShare(shareData) {
+      return shareData.targetUid == request.auth.uid ||
+        shareData.targetEmail == request.auth.token.email;
+    }
+
     match /users/{userId}/interactions/{interactionId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isOwner(userId) || isAdmin();
+      allow read: if isAuthenticated() && exists(/databases/$(database)/documents/shares/$(interactionId + '_' + request.auth.uid));
     }
     match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if isOwner(userId) || isAdmin();
+    }
+    match /roles/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+    match /shares/{shareId} {
+      allow get: if isAuthenticated() && (
+        resource.data.ownerId == request.auth.uid ||
+        isValidShare(resource.data) ||
+        isAdmin()
+      );
+      allow list: if isAuthenticated();
+      allow create: if isAuthenticated() && isOwner(request.resource.data.ownerId);
+      allow update, delete: if isAuthenticated() && (
+        resource.data.ownerId == request.auth.uid ||
+        isAdmin()
+      );
     }
   }
 }
@@ -220,3 +260,30 @@ The following manual test walkthrough exercises all visible components and user 
 - **Expected Outcome**: The downloaded `.md` file contains the pinned location name, coordinates, and address at the top of the exported transcript.
 - **Step 10.5**: Click the edit or remove button on the Location Map Card to test updating or clearing the location pin.
 - **Expected Outcome**: Removing updates Firestore immediately and removes the badge from the toolbar and card from the message stream.
+
+### Test Case 11: Role-Based Access Control (RBAC) & Admin Dashboard
+- **Step 11.1**: Sign in as an administrator (e.g., `shreyasrivastava0407@gmail.com` or switch role to Admin using the role switcher simulation in development).
+- **Expected Outcome**: The header displays an **"Admin"** navigation tab and a golden **"Admin"** role badge.
+- **Step 11.2**: Click the **"Admin"** tab in the navigation bar.
+- **Expected Outcome**: The Admin Dashboard opens, displaying 4 distinct management panes:
+  1. **Directive & Architecture**: View live compliance audits against the Admin Roles Directive (Dual-Gate enforcement, owner-bound isolation, zero client-side role trust). Click **"Re-run Security Audit"** to see all checks pass green.
+  2. **Role Management (RBAC)**: View all registered users, assign or revoke roles (`admin`, `moderator`, `user`), and test the Session Role Simulation switcher.
+  3. **Global Share Governance**: View all reflection shares across the organization with target emails, permissions (`viewer` vs. `editor`), and revoke or change permissions directly.
+  4. **System Health & Telemetry**: View real-time infrastructure indicators, model fallback latency, and active API boundaries.
+- **Step 11.3**: Test the Role Simulation switcher by selecting "User".
+- **Expected Outcome**: The UI updates dynamically, the Admin tab hides, and security checks revert to standard unprivileged user boundaries.
+
+### Test Case 12: Peer-to-Peer Reflection Sharing & Permission Boundaries
+- **Step 12.1**: Open an active reflection session in the Journal view.
+- **Step 12.2**: Click the **"Share"** button in the workspace toolbar.
+- **Expected Outcome**: The **"Share Reflection"** modal dialog opens, showing the reflection title, an email input field, and a permission selector (**"Viewer"** vs. **"Editor"**).
+- **Step 12.3**: Enter a target colleague's email address (e.g., `colleague@example.com`), select **"Viewer"**, and click **"Grant Access"**.
+- **Expected Outcome**: A new share grant is written to the `/shares` collection in Firestore with `ownerId`, `targetEmail`, and `permission: 'viewer'`. The active shares list displays the newly granted peer.
+- **Step 12.4**: Switch permission of the granted user from **"Viewer"** to **"Editor"**.
+- **Expected Outcome**: The permission updates dynamically in Firestore and reflects in the UI.
+- **Step 12.5**: Navigate to the **"Shared"** tab in the top navigation bar.
+- **Expected Outcome**: The Shared Reflections view opens with two sub-tabs:
+  - **Shared with Me**: Displays reflections shared with the current user's email, indicating whether Viewer or Editor rights are held.
+  - **Shared by Me**: Displays all active shares originated by the current user, with direct revoke buttons.
+- **Step 12.6**: Click an entry in the "Shared with Me" list that has **Viewer** permissions.
+- **Expected Outcome**: The reflection loads in read-only mode. The composer is replaced with a **"Viewer Mode: Read-Only Access"** banner, disabling turn submissions while allowing full conversational review.

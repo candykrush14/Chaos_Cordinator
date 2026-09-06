@@ -1,11 +1,10 @@
 import React from 'react';
-import { BookOpen, LogOut, MapPin, Plus, ShieldCheck, Sparkles, User } from 'lucide-react';
-import type { UserProfile } from '../types';
-
-type AppView = 'journal' | 'locations' | 'profile';
+import { BookOpen, LogOut, MapPin, Plus, ShieldCheck, Sparkles, User, Share2, Shield, Compass } from 'lucide-react';
+import type { AppView, UserProfile, UserRole } from '../types';
 
 interface NavbarProps {
   user: UserProfile | null;
+  role: UserRole;
   onSignOut: () => void;
   onNewReflection: () => void;
   hasActiveEntry: boolean;
@@ -15,6 +14,7 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({
   user,
+  role,
   onSignOut,
   onNewReflection,
   view,
@@ -67,6 +67,21 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
             <button
               type="button"
+              id="nav-view-discover-btn"
+              onClick={() => onChangeView('discover')}
+              aria-pressed={view === 'discover'}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+                view === 'discover'
+                  ? 'bg-[#5a5a40] text-white shadow-xs'
+                  : 'text-[#8c8579] hover:text-[#5a5a40]'
+              }`}
+              title="Discover Me - Emotional Gist, Therapy Guidance & Wellness"
+            >
+              <Compass className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Discover Me</span>
+            </button>
+            <button
+              type="button"
               id="nav-view-locations-btn"
               onClick={() => onChangeView('locations')}
               aria-pressed={view === 'locations'}
@@ -79,6 +94,36 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <MapPin className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Locations</span>
+            </button>
+            <button
+              type="button"
+              id="nav-view-shared-btn"
+              onClick={() => onChangeView('shared')}
+              aria-pressed={view === 'shared'}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+                view === 'shared'
+                  ? 'bg-[#5a5a40] text-white shadow-xs'
+                  : 'text-[#8c8579] hover:text-[#5a5a40]'
+              }`}
+              title="Shared Access & Collaboration"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Shared</span>
+            </button>
+            <button
+              type="button"
+              id="nav-view-admin-btn"
+              onClick={() => onChangeView('admin')}
+              aria-pressed={view === 'admin'}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+                view === 'admin'
+                  ? 'bg-[#5a5a40] text-white shadow-xs'
+                  : 'text-[#8c8579] hover:text-[#5a5a40]'
+              }`}
+              title="Admin & RBAC Dashboard"
+            >
+              <Shield className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Admin</span>
             </button>
             <button
               type="button"
@@ -115,9 +160,19 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             <div className="flex items-center gap-3">
               <div className="hidden lg:block text-right leading-tight">
-                <p className="text-[10px] font-bold text-[#8c8579] uppercase tracking-widest">
-                  Authenticated
-                </p>
+                <div className="flex items-center justify-end gap-1.5">
+                  <span
+                    className={`rounded-full px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider ${
+                      role === 'admin'
+                        ? 'bg-amber-100 text-amber-800'
+                        : role === 'editor'
+                        ? 'bg-indigo-100 text-indigo-800'
+                        : 'bg-[#e5e0d8] text-[#5a5a40]'
+                    }`}
+                  >
+                    {role}
+                  </span>
+                </div>
                 <p className="text-xs sm:text-sm font-medium text-[#3d3d3d] truncate max-w-[160px]">
                   {user.email || user.displayName || 'Journaler'}
                 </p>

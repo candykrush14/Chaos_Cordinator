@@ -17,6 +17,7 @@ import {
   getDocs,
   deleteDoc,
   query,
+  where,
   orderBy,
   onSnapshot,
   type Firestore,
@@ -146,4 +147,4 @@ export async function deleteInteractionFromFirestore(
   await deleteDoc(docRef);
 }
 
-export { onAuthStateChanged, collection, doc, query, orderBy, onSnapshot, getDocs, getDoc };
+export { onAuthStateChanged, collection, doc, query, where, orderBy, onSnapshot, getDocs, getDoc, setDoc, deleteDoc };

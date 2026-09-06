@@ -11,6 +11,19 @@ service cloud.firestore {
       return v is string && v.size() > 0 && v.size() <= maxLen;
     }
 
+    function getUserRole(uid) {
+      return exists(/databases/$(database)/documents/roles/$(uid))
+        ? get(/databases/$(database)/documents/roles/$(uid)).data.role
+        : 'user';
+    }
+
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.email == 'shreyasrivastava0407@gmail.com' ||
+        getUserRole(request.auth.uid) == 'admin'
+      );
+    }
+
     function isValidLocation(loc) {
       return loc is map
         && loc.lat is number && loc.lat >= -90 && loc.lat <= 90
@@ -40,17 +53,38 @@ service cloud.firestore {
         && (!('isPinned' in d) || d.isPinned == null || d.isPinned is bool);
     }
 
+    function isValidShare(d) {
+      return d.ownerId == request.auth.uid
+        && isStr(d.id, 128)
+        && isStr(d.reflectionId, 128)
+        && isStr(d.reflectionTitle, 300)
+        && isStr(d.targetEmail, 320)
+        && d.permission in ['viewer', 'editor']
+        && isStr(d.createdAt, 40)
+        && isStr(d.updatedAt, 40);
+    }
+
     // ----- rules -------------------------------------------------------------
     match /users/{userId} {
       // The user document itself is never written by the app.
-      allow read: if isOwner(userId);
+      allow read: if isOwner(userId) || isAdmin();
       allow write: if false;
 
       match /interactions/{interactionId} {
-        allow read: if isOwner(userId);
-        allow create, update: if isOwner(userId)
+        allow read: if isOwner(userId) || isAdmin();
+        allow create, update: if (isOwner(userId) || isAdmin())
           && isValidInteraction(request.resource.data, userId);
-        allow delete: if isOwner(userId);
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+
+      // Wellness points, emotional stats, and happiness index records
+      match /wellness/{wellnessDocId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
+      // Discover Me historical snapshots
+      match /discover_snapshots/{snapshotId} {
+        allow read, write: if isOwner(userId) || isAdmin();
       }
 
       // Outbound notification endpoints. These documents hold webhook URLs and
@@ -60,6 +94,31 @@ service cloud.firestore {
       match /webhooks/{webhookId} {
         allow read, write: if false;
       }
+    }
+
+    // Role-based access control roles table
+    match /roles/{userId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Shared reflection access control
+    match /shares/{shareId} {
+      allow get: if request.auth != null && (
+        resource.data.ownerId == request.auth.uid ||
+        resource.data.targetEmail == request.auth.token.email ||
+        resource.data.targetUserId == request.auth.uid ||
+        isAdmin()
+      );
+      allow list: if request.auth != null;
+      allow create: if request.auth != null
+        && isValidShare(request.resource.data);
+      allow update: if request.auth != null
+        && (resource.data.ownerId == request.auth.uid || isAdmin())
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.permission in ['viewer', 'editor'];
+      allow delete: if request.auth != null
+        && (resource.data.ownerId == request.auth.uid || isAdmin());
     }
 
     // Everything else is denied by default (no recursive wildcard).

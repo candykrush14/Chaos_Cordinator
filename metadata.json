@@ -1,6 +1,6 @@
 {
   "name": "Reflections & Journal",
-  "description": "User-authenticated personal reflections journal and multi-turn AI companion with user-isolated Firestore storage and location-aware pinning.",
+  "description": "User-authenticated personal reflections journal and multi-turn AI companion with user-isolated Firestore storage, location-aware pinning, role-based access control (RBAC), Admin Dashboard, and shared reflection permissions.",
   "requestFramePermissions": ["geolocation"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -14,6 +14,8 @@ import {
   CheckCircle2,
   Download,
   MapPin,
+  Users,
+  Lock,
 } from 'lucide-react';
 import type {
   JournalInteraction,
@@ -39,11 +41,13 @@ import { PromptSuggestions } from './PromptSuggestions';
 import { LocationPickerModal } from './LocationPickerModal';
 import { LocationMapCard } from './LocationMapCard';
 import { DeleteConfirmationModal } from './DeleteConfirmationModal';
+import { ShareModal } from './ShareModal';
 import { sanitizeInputText, formatJournalDate } from '../utils/sanitize';
 
 interface JournalDashboardProps {
   user: UserProfile;
   activeInteraction: JournalInteraction | null;
+  activePermission?: 'viewer' | 'editor';
   onSelectInteraction: (interaction: JournalInteraction) => void;
   onNewReflection: () => void;
 }
@@ -51,6 +55,7 @@ interface JournalDashboardProps {
 export const JournalDashboard: React.FC<JournalDashboardProps> = ({
   user,
   activeInteraction,
+  activePermission,
   onSelectInteraction,
   onNewReflection,
 }) => {
@@ -64,6 +69,7 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showLocationModal, setShowLocationModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   const [failedTurn, setFailedTurn] = useState<{
     userInput: string;
     aiResponse?: string;
@@ -681,6 +687,20 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
               </button>
             )}
 
+            {/* Share Reflection Button */}
+            {activeInteraction && (
+              <button
+                type="button"
+                id="share-active-entry-btn"
+                onClick={() => setShowShareModal(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#e5e0d8] bg-white px-2.5 py-1.5 text-xs font-medium text-[#3d3d3d] transition-colors hover:bg-[#f5f2ed] hover:border-[#5a5a40]/40 cursor-pointer shadow-2xs"
+                title="Share this reflection with peers or colleagues"
+              >
+                <Users className="h-3.5 w-3.5 text-[#5a5a40]" />
+                <span className="hidden sm:inline">Share</span>
+              </button>
+            )}
+
             {activeInteraction && activeInteraction.messages?.length > 0 && (
               <button
                 type="button"
@@ -952,49 +972,61 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
               })}
             </div>
 
-            {/* Input Form */}
-            <form onSubmit={handleSubmitEntry} className="relative">
-              <textarea
-                ref={textareaRef}
-                id="journal-input-textarea"
-                rows={3}
-                placeholder={
-                  selectedMode === 'brainstorm'
-                    ? 'What problem or creative idea would you like to brainstorm today?'
-                    : selectedMode === 'summary'
-                    ? 'Paste or write a longer journal entry to receive a thoughtful synthesis...'
-                    : 'Pour your thoughts, feelings, or day reflections here...'
-                }
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault();
-                    handleSubmitEntry();
-                  }
-                }}
-                disabled={isGenerating}
-                className="w-full resize-none rounded-xl border border-[#e5e0d8] bg-[#fdfbf7] p-3.5 pr-24 text-sm text-[#3d3d3d] placeholder:text-[#8c8579] focus:border-[#5a5a40] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#5a5a40] disabled:opacity-60"
-              />
-
-              <div className="absolute right-3 bottom-3.5 flex items-center gap-2">
-                <button
-                  type="submit"
-                  id="submit-journal-entry-btn"
-                  disabled={!inputText.trim() || isGenerating}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#5a5a40] px-3.5 py-2 text-xs font-medium text-white shadow-xs transition-all hover:bg-[#4a4a35] active:scale-95 disabled:pointer-events-none disabled:opacity-40 cursor-pointer"
-                >
-                  {isGenerating ? (
-                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <>
-                      <span>Send</span>
-                      <Send className="h-3 w-3" />
-                    </>
-                  )}
-                </button>
+            {/* Input Form or Viewer Mode Banner */}
+            {activePermission === 'viewer' ? (
+              <div className="rounded-xl border border-[#e5e0d8] bg-[#f5f2ed] p-4 text-center">
+                <div className="flex items-center justify-center gap-2 text-xs font-semibold text-[#5a5a40]">
+                  <Lock className="h-4 w-4" />
+                  <span>Viewer Mode: Read-Only Access</span>
+                </div>
+                <p className="mt-1 text-[11px] text-[#8c8579]">
+                  This reflection was shared with you under Viewer privileges. Contact the reflection owner if you require Editor permissions to contribute turns.
+                </p>
               </div>
-            </form>
+            ) : (
+              <form onSubmit={handleSubmitEntry} className="relative">
+                <textarea
+                  ref={textareaRef}
+                  id="journal-input-textarea"
+                  rows={3}
+                  placeholder={
+                    selectedMode === 'brainstorm'
+                      ? 'What problem or creative idea would you like to brainstorm today?'
+                      : selectedMode === 'summary'
+                      ? 'Paste or write a longer journal entry to receive a thoughtful synthesis...'
+                      : 'Pour your thoughts, feelings, or day reflections here...'
+                  }
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      handleSubmitEntry();
+                    }
+                  }}
+                  disabled={isGenerating}
+                  className="w-full resize-none rounded-xl border border-[#e5e0d8] bg-[#fdfbf7] p-3.5 pr-24 text-sm text-[#3d3d3d] placeholder:text-[#8c8579] focus:border-[#5a5a40] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#5a5a40] disabled:opacity-60"
+                />
+
+                <div className="absolute right-3 bottom-3.5 flex items-center gap-2">
+                  <button
+                    type="submit"
+                    id="submit-journal-entry-btn"
+                    disabled={!inputText.trim() || isGenerating}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#5a5a40] px-3.5 py-2 text-xs font-medium text-white shadow-xs transition-all hover:bg-[#4a4a35] active:scale-95 disabled:pointer-events-none disabled:opacity-40 cursor-pointer"
+                  >
+                    {isGenerating ? (
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <>
+                        <span>Send</span>
+                        <Send className="h-3 w-3" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
 
             <div className="flex items-center justify-between text-[11px] text-[#8c8579] px-1">
               <span className="hidden sm:inline">
@@ -1009,6 +1041,14 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
           </div>
         </div>
       </main>
+
+      {/* Share Reflection Modal */}
+      <ShareModal
+        isOpen={showShareModal}
+        interaction={activeInteraction}
+        currentUser={user}
+        onClose={() => setShowShareModal(false)}
+      />
 
       {/* Location Picker & Google Maps Integration Modal */}
       <LocationPickerModal

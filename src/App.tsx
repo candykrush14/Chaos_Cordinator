@@ -15,25 +15,28 @@ import { AuthLanding } from './components/AuthLanding';
 import { JournalDashboard } from './components/JournalDashboard';
 import { LocationsMapView } from './components/LocationsMapView';
 import { ProfileView } from './components/ProfileView';
+import { AdminDashboard } from './components/AdminDashboard';
+import { SharedReflectionsView } from './components/SharedReflectionsView';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import type { UserProfile, JournalInteraction } from './types';
+import type { UserProfile, JournalInteraction, UserRole, AppView } from './types';
+import { getEffectiveUserRole } from './utils/rbac';
 import { BookOpen } from 'lucide-react';
-
-type AppView = 'journal' | 'locations' | 'profile';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [role, setRole] = useState<UserRole>('user');
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [activeInteraction, setActiveInteraction] = useState<JournalInteraction | null>(null);
+  const [activePermission, setActivePermission] = useState<'viewer' | 'editor' | undefined>(undefined);
   const [view, setView] = useState<AppView>('journal');
 
-  // 1. Subscribe to Firebase Auth State
+  // 1. Subscribe to Firebase Auth State and resolve Authoritative User Role
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        setUser({
+        const userProfile: UserProfile = {
           uid: firebaseUser.uid,
           email: firebaseUser.email,
           displayName: firebaseUser.displayName,
@@ -41,10 +44,22 @@ export default function App() {
           providerId: firebaseUser.providerData?.[0]?.providerId ?? null,
           createdAt: firebaseUser.metadata?.creationTime ?? null,
           lastSignInAt: firebaseUser.metadata?.lastSignInTime ?? null,
-        });
+        };
+        setUser(userProfile);
+
+        // Authoritative server-side role resolution with security simulation support
+        try {
+          const resolvedRole = await getEffectiveUserRole(userProfile);
+          setRole(resolvedRole);
+        } catch (e) {
+          console.error('Failed to resolve user role:', e);
+          setRole('user');
+        }
       } else {
         setUser(null);
+        setRole('user');
         setActiveInteraction(null);
+        setActivePermission(undefined);
         setView('journal');
       }
       setAuthLoading(false);
@@ -75,7 +90,9 @@ export default function App() {
     try {
       await logOut();
       setUser(null);
+      setRole('user');
       setActiveInteraction(null);
+      setActivePermission(undefined);
       setView('journal');
     } catch (err: any) {
       console.error('Sign out error:', err);
@@ -85,6 +102,7 @@ export default function App() {
   // 4. Start a clean new reflection canvas
   const handleNewReflection = () => {
     setView('journal');
+    setActivePermission(undefined);
     setActiveInteraction({
       id: 'int-' + Date.now(),
       userId: user?.uid || '',
@@ -115,6 +133,7 @@ export default function App() {
     <div className="min-h-dvh bg-[#fdfbf7] font-sans text-[#3d3d3d] antialiased selection:bg-[#e5e0d8]">
       <Navbar
         user={user}
+        role={role}
         onSignOut={handleSignOut}
         onNewReflection={handleNewReflection}
         hasActiveEntry={Boolean(activeInteraction && activeInteraction.messages?.length > 0)}
@@ -126,7 +145,15 @@ export default function App() {
       <ErrorBoundary
         key={view}
         label={
-          view === 'locations' ? 'the map view' : view === 'profile' ? 'your profile' : 'your journal'
+          view === 'locations'
+            ? 'the map view'
+            : view === 'profile'
+            ? 'your profile'
+            : view === 'admin'
+            ? 'the admin dashboard'
+            : view === 'shared'
+            ? 'the shared reflections'
+            : 'your journal'
         }
       >
         {!user ? (
@@ -147,6 +174,24 @@ export default function App() {
             user={user}
             onOpenEntry={(entry) => {
               setActiveInteraction(entry);
+              setActivePermission(undefined);
+              setView('journal');
+            }}
+            onBackToJournal={() => setView('journal')}
+          />
+        ) : view === 'admin' ? (
+          <AdminDashboard
+            currentUser={user}
+            currentRole={role}
+            onRoleChanged={(newRole) => setRole(newRole)}
+            onBackToJournal={() => setView('journal')}
+          />
+        ) : view === 'shared' ? (
+          <SharedReflectionsView
+            user={user}
+            onOpenEntry={(entry, perm) => {
+              setActiveInteraction(entry);
+              setActivePermission(perm);
               setView('journal');
             }}
             onBackToJournal={() => setView('journal')}
@@ -155,7 +200,11 @@ export default function App() {
           <JournalDashboard
             user={user}
             activeInteraction={activeInteraction}
-            onSelectInteraction={(interaction) => setActiveInteraction(interaction)}
+            activePermission={activePermission}
+            onSelectInteraction={(interaction) => {
+              setActiveInteraction(interaction);
+              setActivePermission(undefined);
+            }}
             onNewReflection={handleNewReflection}
           />
         )}
