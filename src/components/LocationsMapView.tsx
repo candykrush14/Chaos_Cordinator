@@ -88,6 +88,12 @@ const FitBounds: React.FC<{ entries: LocatedEntry[] }> = ({ entries }) => {
     if (sig === fittedSigRef.current) return;
     fittedSigRef.current = sig;
 
+    if (entries.length === 1) {
+      map.panTo({ lat: entries[0].location.lat, lng: entries[0].location.lng });
+      map.setZoom(13);
+      return;
+    }
+
     const bounds = new coreLib.LatLngBounds();
     entries.forEach((e) => bounds.extend({ lat: e.location.lat, lng: e.location.lng }));
     map.fitBounds(bounds, 72);
@@ -95,7 +101,7 @@ const FitBounds: React.FC<{ entries: LocatedEntry[] }> = ({ entries }) => {
     // fitBounds on a single (or very tight) cluster over-zooms; clamp once idle.
     const listener = map.addListener('idle', () => {
       const zoom = map.getZoom();
-      if (typeof zoom === 'number' && zoom > 14) map.setZoom(14);
+      if (typeof zoom === 'number' && zoom > 15) map.setZoom(15);
       listener.remove();
     });
     return () => listener.remove();
@@ -116,44 +122,75 @@ const ClusteredEntryMarkers: React.FC<{
 }> = ({ entries, selectedId, onSelect }) => {
   const map = useMap();
   const markerLib = useMapsLibrary('marker');
-  const [markers, setMarkers] = useState<Record<string, Marker>>({});
+  const markersRef = useRef<Record<string, Marker>>({});
+  const clustererRef = useRef<MarkerClusterer | null>(null);
 
-  const clusterer = useMemo(() => {
-    if (!map || !markerLib) return null;
+  // Initialize clusterer once map and marker library are ready
+  useEffect(() => {
+    if (!map || !markerLib) return;
+
     const renderer: Renderer = {
-      render: ({ count, position }) => {
+      render: (cluster) => {
         const el = document.createElement('div');
         el.className = 'photos-cluster';
-        el.textContent = String(count);
+        el.textContent = String(cluster.count);
         return new markerLib.AdvancedMarkerElement({
-          position,
+          position: cluster.position,
           content: el,
-          zIndex: 1000 + count,
+          zIndex: 1000 + cluster.count,
         });
       },
     };
-    return new MarkerClusterer({ map, renderer });
+
+    const clusterer = new MarkerClusterer({
+      map,
+      renderer,
+      onClusterClick: (_event, cluster, mapInstance) => {
+        if (cluster.bounds) {
+          mapInstance.fitBounds(cluster.bounds, 40);
+        }
+      },
+    });
+    clustererRef.current = clusterer;
+
+    // Attach any existing markers that mounted before clusterer was ready
+    const initialMarkers = Object.values(markersRef.current).filter(Boolean);
+    if (initialMarkers.length > 0) {
+      clusterer.addMarkers(initialMarkers);
+    }
+
+    return () => {
+      clusterer.clearMarkers();
+      clusterer.setMap(null);
+      clustererRef.current = null;
+    };
   }, [map, markerLib]);
 
-  useEffect(() => {
-    if (!clusterer) return;
-    clusterer.clearMarkers();
-    clusterer.addMarkers(Object.values(markers));
-    return () => clusterer.clearMarkers();
-  }, [clusterer, markers]);
-
-  const setMarkerRef = useCallback((marker: Marker | null, key: string) => {
-    setMarkers((prev) => {
-      if (marker) {
-        if (prev[key] === marker) return prev;
-        return { ...prev, [key]: marker };
+  // Sync clusterer whenever markers mount/unmount
+  const syncClusterer = useCallback(() => {
+    if (clustererRef.current) {
+      clustererRef.current.clearMarkers();
+      const currentMarkers = Object.values(markersRef.current).filter(Boolean);
+      if (currentMarkers.length > 0) {
+        clustererRef.current.addMarkers(currentMarkers);
       }
-      if (!(key in prev)) return prev;
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
+    }
   }, []);
+
+  const setMarkerRef = useCallback(
+    (marker: Marker | null, key: string) => {
+      if (marker) {
+        if (markersRef.current[key] === marker) return;
+        markersRef.current[key] = marker;
+        syncClusterer();
+      } else {
+        if (!(key in markersRef.current)) return;
+        delete markersRef.current[key];
+        syncClusterer();
+      }
+    },
+    [syncClusterer]
+  );
 
   return (
     <>
@@ -297,6 +334,22 @@ const EntriesMap: React.FC<{
           onOpen={() => onOpenEntry(selected)}
         />
       )}
+
+      {entries.length === 0 && (
+        <div className="pointer-events-none absolute inset-x-0 top-4 z-10 flex justify-center px-4">
+          <div className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-[#e5e0d8] bg-[#fdfbf7]/95 px-4 py-3 shadow-lg backdrop-blur-md">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#5a5a40] text-white">
+              <MapPin className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-[#3d3d3d]">No pinned locations yet</p>
+              <p className="text-[11px] text-[#8c8579]">
+                Open any reflection in your journal and use &ldquo;Pin Location&rdquo; to drop it on this map.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -386,14 +439,17 @@ export const LocationsMapView: React.FC<LocationsMapViewProps> = ({
       return;
     }
     setLoading(true);
-    const q = query(getInteractionsCollectionRef(user.uid), orderBy('updatedAt', 'desc'));
+    const colRef = getInteractionsCollectionRef(user.uid);
     const unsubscribe = onSnapshot(
-      q,
+      colRef,
       (snapshot) => {
         const list: JournalInteraction[] = [];
         snapshot.forEach((doc) => {
           list.push({ ...(doc.data() as JournalInteraction), id: doc.id });
         });
+        list.sort((a, b) =>
+          (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || '')
+        );
         setEntries(list);
         setLoading(false);
       },
@@ -446,28 +502,6 @@ export const LocationsMapView: React.FC<LocationsMapViewProps> = ({
             <Loader2 className="mr-2 h-4 w-4 animate-spin text-[#5a5a40]" />
             Loading pinned locations…
           </div>
-        ) : entries.length === 0 ? (
-          <EmptyState
-            icon={<BookOpen className="h-6 w-6" />}
-            title="No journal entries yet"
-            body="You haven't written any reflections yet. Start one, and any entry you pin to a place will show up here as a map drop."
-            actionLabel="Write your first entry"
-            onAction={onBackToJournal}
-          />
-        ) : located.length === 0 ? (
-          <EmptyState
-            icon={<MapPin className="h-6 w-6" />}
-            title="No pinned locations yet"
-            body={
-              <>
-                You have {entries.length} {entries.length === 1 ? 'entry' : 'entries'}, but none of
-                them has a location yet. Open a reflection and use{' '}
-                <span className="font-semibold">Pin Location</span> to tie it to a place.
-              </>
-            }
-            actionLabel="Go to journal"
-            onAction={onBackToJournal}
-          />
         ) : hasKey ? (
           <ErrorBoundary
             label="the map"
@@ -507,6 +541,28 @@ export const LocationsMapView: React.FC<LocationsMapViewProps> = ({
               </APIProvider>
             </div>
           </ErrorBoundary>
+        ) : entries.length === 0 ? (
+          <EmptyState
+            icon={<BookOpen className="h-6 w-6" />}
+            title="No journal entries yet"
+            body="You haven't written any reflections yet. Start one, and any entry you pin to a place will show up here as a map drop."
+            actionLabel="Write your first entry"
+            onAction={onBackToJournal}
+          />
+        ) : located.length === 0 ? (
+          <EmptyState
+            icon={<MapPin className="h-6 w-6" />}
+            title="No pinned locations yet"
+            body={
+              <>
+                You have {entries.length} {entries.length === 1 ? 'entry' : 'entries'}, but none of
+                them has a location yet. Open a reflection and use{' '}
+                <span className="font-semibold">Pin Location</span> to tie it to a place.
+              </>
+            }
+            actionLabel="Go to journal"
+            onAction={onBackToJournal}
+          />
         ) : (
           <FallbackList entries={located} onOpenEntry={onOpenEntry} />
         )}

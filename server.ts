@@ -3,8 +3,10 @@ import type { NextFunction, Request, Response } from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import * as admin from "firebase-admin";
+import { getApps, initializeApp, type App } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import dotenv from "dotenv";
+import firebaseConfig from "./firebase-applet-config.json";
 
 dotenv.config();
 
@@ -22,15 +24,22 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 // --- Firebase Admin: verify the caller's Firebase ID token on /api/* ----------
-// On Cloud Run the runtime service account supplies Application Default
-// Credentials and the project id is auto-detected. Locally, run
-// `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS.
-let adminApp: admin.app.App | null = null;
+const FIREBASE_PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || firebaseConfig.projectId;
+if (!process.env.GOOGLE_CLOUD_PROJECT && FIREBASE_PROJECT_ID) {
+  process.env.GOOGLE_CLOUD_PROJECT = FIREBASE_PROJECT_ID;
+}
+
+let adminApp: App | null = null;
 function getAdminAuth() {
   if (!adminApp) {
-    adminApp = admin.apps.length ? admin.app()! : admin.initializeApp();
+    const apps = getApps();
+    adminApp = apps.length
+      ? apps[0]
+      : initializeApp({
+          projectId: FIREBASE_PROJECT_ID,
+        });
   }
-  return adminApp.auth();
+  return getAuth(adminApp);
 }
 
 async function requireAuth(req: Request, res: Response, next: NextFunction) {

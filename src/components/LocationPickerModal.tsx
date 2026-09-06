@@ -91,25 +91,93 @@ const GoogleMapsConnectedModal: React.FC<{
   const searchContainerRef = useRef<HTMLDivElement>(null);
   const sessionTokenRef = useRef<any>(null);
 
+  /**
+   * Reverse Geocoding logic:
+   * Called when clicking on the map or dragging the cursor/pin.
+   * Updates BOTH the location spot name AND vicinity address with real-world names
+   * via our multi-tier proxy without invoking the unbilled Google Maps Geocoding service in the browser.
+   * Keeps search bar blank by default so user can type searches freely.
+   */
+  const performReverseGeocode = useCallback(
+    async (targetLat: number, targetLng: number) => {
+      setIsReverseGeocoding(true);
+      setStatusNotification('Resolving location & vicinity...');
+
+      try {
+        const loc = await fetchReverseGeocodedLocation(targetLat, targetLng);
+        setName(loc.name);
+        setAddress(loc.address);
+        // Keep search bar blank by default; do not overwrite with loc.name
+        setStatusNotification(`Location resolved: ${loc.name}`);
+      } catch (err) {
+        console.warn('[LocationPicker] Reverse geocode error:', err);
+        const fb = fallbackReverseGeocode(targetLat, targetLng);
+        setName(fb.name);
+        setAddress(fb.address);
+        // Keep search bar blank by default; do not overwrite with fb.name
+        setStatusNotification(`Location updated: ${fb.name}`);
+      } finally {
+        setIsReverseGeocoding(false);
+      }
+    },
+    []
+  );
+
   // Initialize state on open
   useEffect(() => {
+    // Keep search bar blank by default
+    setSearchQuery('');
+    setGeoError(null);
+    setStatusNotification(null);
+    setIsDropdownOpen(false);
+
     if (currentLocation) {
       setName(currentLocation.name);
       setAddress(currentLocation.address || '');
       setLat(currentLocation.lat);
       setLng(currentLocation.lng);
-      setSearchQuery(currentLocation.name);
+      if (map) {
+        map.panTo({ lat: currentLocation.lat, lng: currentLocation.lng });
+      }
     } else {
-      setName('Kyoto Zen Bamboo Grove');
-      setAddress('Arashiyama, Kyoto, 616-0007, Japan');
-      setLat(35.0169);
-      setLng(135.6713);
-      setSearchQuery('Kyoto Zen Bamboo Grove');
+      // When pin to location opens, detect and show the user's current location on the map
+      if (navigator.geolocation) {
+        setIsLocating(true);
+        setStatusNotification('Detecting your current location...');
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const userLat = Number(position.coords.latitude.toFixed(6));
+            const userLng = Number(position.coords.longitude.toFixed(6));
+            setLat(userLat);
+            setLng(userLng);
+            setIsLocating(false);
+            setStatusNotification('Showing current location on map');
+            if (map) {
+              map.panTo({ lat: userLat, lng: userLng });
+              map.setZoom(15);
+            }
+            performReverseGeocode(userLat, userLng);
+          },
+          (err) => {
+            console.warn('Geolocation auto-detect failed or denied:', err);
+            setIsLocating(false);
+            setGeoError('Could not detect device GPS. You can click on the map or search.');
+            performReverseGeocode(37.7749, -122.4194);
+          },
+          { timeout: 8000, enableHighAccuracy: true }
+        );
+      } else {
+        performReverseGeocode(37.7749, -122.4194);
+      }
     }
-    setGeoError(null);
-    setStatusNotification(null);
-    setIsDropdownOpen(false);
-  }, [currentLocation]);
+  }, [currentLocation, performReverseGeocode]);
+
+  // Ensure map centers on coordinates whenever Google Maps SDK instance is ready
+  useEffect(() => {
+    if (map && lat && lng) {
+      map.panTo({ lat, lng });
+    }
+  }, [map]);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -124,37 +192,6 @@ const GoogleMapsConnectedModal: React.FC<{
     document.addEventListener('mousedown', handlePointerDownOutside);
     return () => document.removeEventListener('mousedown', handlePointerDownOutside);
   }, []);
-
-  /**
-   * Reverse Geocoding logic:
-   * Called when clicking on the map or dragging the cursor/pin.
-   * Updates BOTH the location spot name AND vicinity address with real-world names
-   * via our multi-tier proxy without invoking the unbilled Google Maps Geocoding service in the browser.
-   */
-  const performReverseGeocode = useCallback(
-    async (targetLat: number, targetLng: number) => {
-      setIsReverseGeocoding(true);
-      setStatusNotification('Resolving location & vicinity...');
-
-      try {
-        const loc = await fetchReverseGeocodedLocation(targetLat, targetLng);
-        setName(loc.name);
-        setAddress(loc.address);
-        setSearchQuery(loc.name);
-        setStatusNotification(`Location resolved: ${loc.name}`);
-      } catch (err) {
-        console.warn('[LocationPicker] Reverse geocode error:', err);
-        const fb = fallbackReverseGeocode(targetLat, targetLng);
-        setName(fb.name);
-        setAddress(fb.address);
-        setSearchQuery(fb.name);
-        setStatusNotification(`Location updated: ${fb.name}`);
-      } finally {
-        setIsReverseGeocoding(false);
-      }
-    },
-    []
-  );
 
   /**
    * Handle user interacting directly with map: clicking or dragging the cursor/pin
@@ -433,13 +470,15 @@ const GoogleMapsConnectedModal: React.FC<{
 
     setIsLocating(true);
     setGeoError(null);
+    setStatusNotification('Detecting your current location...');
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const userLat = position.coords.latitude;
-        const userLng = position.coords.longitude;
+        const userLat = Number(position.coords.latitude.toFixed(6));
+        const userLng = Number(position.coords.longitude.toFixed(6));
         handleMapPointChange(userLat, userLng);
         setIsLocating(false);
+        setStatusNotification('Centered on your current location');
       },
       (error) => {
         setIsLocating(false);
@@ -454,7 +493,6 @@ const GoogleMapsConnectedModal: React.FC<{
     setAddress(preset.address);
     setLat(preset.lat);
     setLng(preset.lng);
-    setSearchQuery(preset.name);
     setStatusNotification(`Preset loaded: ${preset.name}`);
 
     if (map) {
@@ -801,9 +839,8 @@ const GoogleMapsConnectedModal: React.FC<{
               value={name}
               onChange={(e) => {
                 setName(e.target.value);
-                setSearchQuery(e.target.value);
               }}
-              placeholder="e.g. Kyoto Zen Bamboo Grove"
+              placeholder="e.g. Home Studio, Central Park, Sunset Overlook"
               className="w-full rounded-xl border border-[#e5e0d8] bg-white px-3 py-2 text-xs text-[#3d3d3d] placeholder:text-[#8c8579]/60 focus:border-[#5a5a40] focus:outline-none"
             />
           </div>
@@ -931,18 +968,42 @@ const FallbackLocationModal: React.FC<{
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Keep search bar blank by default as requested
+    setSearchQuery('');
+    setGeoError(null);
+    setStatusNotification(null);
+    setIsDropdownOpen(false);
+
     if (currentLocation) {
       setName(currentLocation.name);
       setAddress(currentLocation.address || '');
       setLat(currentLocation.lat);
       setLng(currentLocation.lng);
-      setSearchQuery(currentLocation.name);
     } else {
-      setName('Kyoto Zen Bamboo Grove');
-      setAddress('Arashiyama, Kyoto, 616-0007, Japan');
-      setLat(35.0169);
-      setLng(135.6713);
-      setSearchQuery('Kyoto Zen Bamboo Grove');
+      // Auto-detect and show current location on the map
+      if (navigator.geolocation) {
+        setIsLocating(true);
+        setStatusNotification('Detecting your current location...');
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            const uLat = Number(position.coords.latitude.toFixed(6));
+            const uLng = Number(position.coords.longitude.toFixed(6));
+            setLat(uLat);
+            setLng(uLng);
+            await resolveFallbackPoint(uLat, uLng);
+            setIsLocating(false);
+            setStatusNotification('Showing current location on map');
+          },
+          () => {
+            setIsLocating(false);
+            setGeoError('Could not detect device GPS. You can click on the map or search.');
+            resolveFallbackPoint(37.7749, -122.4194);
+          },
+          { timeout: 8000, enableHighAccuracy: true }
+        );
+      } else {
+        resolveFallbackPoint(37.7749, -122.4194);
+      }
     }
   }, [currentLocation]);
 
@@ -999,13 +1060,13 @@ const FallbackLocationModal: React.FC<{
       const loc = await fetchReverseGeocodedLocation(targetLat, targetLng);
       setName(loc.name);
       setAddress(loc.address);
-      setSearchQuery(loc.name);
+      // Keep search bar blank by default; do not overwrite with loc.name
       setStatusNotification(`Location resolved: ${loc.name}`);
     } catch {
       const fb = fallbackReverseGeocode(targetLat, targetLng);
       setName(fb.name);
       setAddress(fb.address);
-      setSearchQuery(fb.name);
+      // Keep search bar blank by default; do not overwrite with fb.name
       setStatusNotification(`Location updated: ${fb.name}`);
     }
   };
@@ -1080,7 +1141,6 @@ const FallbackLocationModal: React.FC<{
     setAddress(preset.address);
     setLat(preset.lat);
     setLng(preset.lng);
-    setSearchQuery(preset.name);
     setStatusNotification(`Preset loaded: ${preset.name}`);
   };
 
