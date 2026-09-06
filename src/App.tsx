@@ -13,8 +13,12 @@ import {
 import { Navbar } from './components/Navbar';
 import { AuthLanding } from './components/AuthLanding';
 import { JournalDashboard } from './components/JournalDashboard';
+import { LocationsMapView } from './components/LocationsMapView';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import type { UserProfile, JournalInteraction } from './types';
 import { BookOpen } from 'lucide-react';
+
+type AppView = 'journal' | 'locations';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -22,6 +26,7 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [activeInteraction, setActiveInteraction] = useState<JournalInteraction | null>(null);
+  const [view, setView] = useState<AppView>('journal');
 
   // 1. Subscribe to Firebase Auth State
   useEffect(() => {
@@ -36,6 +41,7 @@ export default function App() {
       } else {
         setUser(null);
         setActiveInteraction(null);
+        setView('journal');
       }
       setAuthLoading(false);
     });
@@ -66,6 +72,7 @@ export default function App() {
       await logOut();
       setUser(null);
       setActiveInteraction(null);
+      setView('journal');
     } catch (err: any) {
       console.error('Sign out error:', err);
     }
@@ -73,6 +80,7 @@ export default function App() {
 
   // 4. Start a clean new reflection canvas
   const handleNewReflection = () => {
+    setView('journal');
     setActiveInteraction({
       id: 'int-' + Date.now(),
       userId: user?.uid || '',
@@ -86,7 +94,7 @@ export default function App() {
 
   if (authLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#fdfbf7] text-[#3d3d3d]">
+      <div className="flex min-h-dvh items-center justify-center bg-[#fdfbf7] text-[#3d3d3d]">
         <div className="flex flex-col items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#5a5a40] text-white shadow-md">
             <BookOpen className="h-6 w-6 animate-pulse" />
@@ -100,29 +108,43 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#fdfbf7] font-sans text-[#3d3d3d] antialiased selection:bg-[#e5e0d8]">
+    <div className="min-h-dvh bg-[#fdfbf7] font-sans text-[#3d3d3d] antialiased selection:bg-[#e5e0d8]">
       <Navbar
         user={user}
         onSignOut={handleSignOut}
         onNewReflection={handleNewReflection}
         hasActiveEntry={Boolean(activeInteraction && activeInteraction.messages?.length > 0)}
+        view={view}
+        onChangeView={setView}
       />
 
-      {!user ? (
-        <AuthLanding
-          onSignIn={handleSignIn}
-          isLoading={isSigningIn}
-          errorMessage={authError}
-          onClearError={() => setAuthError(null)}
-        />
-      ) : (
-        <JournalDashboard
-          user={user}
-          activeInteraction={activeInteraction}
-          onSelectInteraction={(interaction) => setActiveInteraction(interaction)}
-          onNewReflection={handleNewReflection}
-        />
-      )}
+      {/* Keyed by view so switching tabs clears a previously caught error. */}
+      <ErrorBoundary key={view} label={view === 'locations' ? 'the map view' : 'your journal'}>
+        {!user ? (
+          <AuthLanding
+            onSignIn={handleSignIn}
+            isLoading={isSigningIn}
+            errorMessage={authError}
+            onClearError={() => setAuthError(null)}
+          />
+        ) : view === 'locations' ? (
+          <LocationsMapView
+            user={user}
+            onOpenEntry={(entry) => {
+              setActiveInteraction(entry);
+              setView('journal');
+            }}
+            onBackToJournal={() => setView('journal')}
+          />
+        ) : (
+          <JournalDashboard
+            user={user}
+            activeInteraction={activeInteraction}
+            onSelectInteraction={(interaction) => setActiveInteraction(interaction)}
+            onNewReflection={handleNewReflection}
+          />
+        )}
+      </ErrorBoundary>
     </div>
   );
 }

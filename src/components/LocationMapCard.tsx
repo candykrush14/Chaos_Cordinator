@@ -133,7 +133,9 @@ export const LocationMapCard: React.FC<LocationMapCardProps> = ({
                 <Compass className="h-6 w-6 text-[#5a5a40] shrink-0" />
                 <div>
                   <div className="font-semibold text-[#3d3d3d]">
-                    Geographic Coordinates: {location.lat.toFixed(4)}° N, {location.lng.toFixed(4)}° W
+                    Geographic Coordinates: {Math.abs(location.lat).toFixed(4)}°{' '}
+                    {location.lat >= 0 ? 'N' : 'S'}, {Math.abs(location.lng).toFixed(4)}°{' '}
+                    {location.lng >= 0 ? 'E' : 'W'}
                   </div>
                   <div className="text-[11px] text-[#8c8579] mt-0.5">
                     {location.address || 'Custom GPS coordinate pinned to this journal session'}

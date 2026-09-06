@@ -1,0 +1,6 @@
+{
+  "firestore": {
+    "database": "ai-studio-reflectionsjourn-5223fbc6-9091-4f0c-b40f-2dd8d60bad5d",
+    "rules": "firestore.rules"
+  }
+}

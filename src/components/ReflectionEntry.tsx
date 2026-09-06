@@ -78,14 +78,12 @@ export const ReflectionEntry: React.FC<ReflectionEntryProps> = ({ message, onDel
 
         {/* Message Content */}
         {isUser ? (
-          <p className="whitespace-pre-wrap text-base leading-relaxed text-[#3d3d3d]">
+          <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-base leading-relaxed text-[#3d3d3d]">
             {message.content}
           </p>
         ) : (
-          <div className="prose prose-stone max-w-none text-base text-[#3d3d3d] leading-relaxed font-serif prose-p:leading-relaxed prose-headings:font-serif prose-headings:text-[#5a5a40] prose-strong:text-[#3d3d3d]">
-            <div className="markdown-body">
-              <Markdown>{message.content}</Markdown>
-            </div>
+          <div className="markdown-body">
+            <Markdown>{message.content}</Markdown>
           </div>
         )}
 

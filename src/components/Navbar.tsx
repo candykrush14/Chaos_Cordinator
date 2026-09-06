@@ -1,18 +1,24 @@
 import React from 'react';
-import { BookOpen, LogOut, Plus, ShieldCheck, Sparkles } from 'lucide-react';
+import { BookOpen, LogOut, MapPin, Plus, ShieldCheck, Sparkles } from 'lucide-react';
 import type { UserProfile } from '../types';
+
+type AppView = 'journal' | 'locations';
 
 interface NavbarProps {
   user: UserProfile | null;
   onSignOut: () => void;
   onNewReflection: () => void;
   hasActiveEntry: boolean;
+  view: AppView;
+  onChangeView: (view: AppView) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   user,
   onSignOut,
   onNewReflection,
+  view,
+  onChangeView,
 }) => {
   return (
     <header
@@ -30,7 +36,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="font-serif text-xl font-semibold tracking-tight text-[#3d3d3d]">
                 Reflections
               </span>
-              <span className="flex items-center gap-1 rounded-full bg-[#f5f2ed] border border-[#e5e0d8] px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[#5a5a40]">
+              <span className="hidden sm:flex items-center gap-1 rounded-full bg-[#f5f2ed] border border-[#e5e0d8] px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[#5a5a40]">
                 <Sparkles className="h-2.5 w-2.5" />
                 Gemini 3.6
               </span>
@@ -41,17 +47,53 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
+        {/* Primary view switch */}
+        {user && (
+          <div className="flex items-center gap-1 rounded-xl border border-[#e5e0d8] bg-[#f5f2ed] p-1">
+            <button
+              type="button"
+              id="nav-view-journal-btn"
+              onClick={() => onChangeView('journal')}
+              aria-pressed={view === 'journal'}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+                view === 'journal'
+                  ? 'bg-[#5a5a40] text-white shadow-xs'
+                  : 'text-[#8c8579] hover:text-[#5a5a40]'
+              }`}
+              title="Journal"
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Journal</span>
+            </button>
+            <button
+              type="button"
+              id="nav-view-locations-btn"
+              onClick={() => onChangeView('locations')}
+              aria-pressed={view === 'locations'}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+                view === 'locations'
+                  ? 'bg-[#5a5a40] text-white shadow-xs'
+                  : 'text-[#8c8579] hover:text-[#5a5a40]'
+              }`}
+              title="Location-Aware Entries"
+            >
+              <MapPin className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Locations</span>
+            </button>
+          </div>
+        )}
+
         {/* User profile & actions */}
         {user ? (
           <div className="flex items-center gap-3 sm:gap-4">
             <button
               id="new-reflection-header-btn"
               onClick={onNewReflection}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-[#5a5a40] px-3.5 py-2 text-xs sm:text-sm font-medium text-white transition-colors hover:bg-[#4a4a35] active:scale-[0.99] shadow-xs cursor-pointer"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#5a5a40] px-3 sm:px-3.5 py-2 text-xs sm:text-sm font-medium text-white transition-colors hover:bg-[#4a4a35] active:scale-[0.99] shadow-xs cursor-pointer"
               title="Start a new reflection session"
             >
               <Plus className="h-4 w-4" />
-              <span>New Entry</span>
+              <span className="hidden sm:inline">New Entry</span>
             </button>
 
             <div className="h-6 w-px bg-[#e5e0d8] hidden sm:block" />

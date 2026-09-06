@@ -66,6 +66,28 @@ export async function logOut(): Promise<void> {
   await firebaseSignOut(auth);
 }
 
+// Fresh Firebase ID token for authenticating calls to our own /api/* endpoints.
+// The SDK caches and auto-refreshes; returns null when signed out.
+export async function getIdToken(): Promise<string | null> {
+  const current = auth.currentUser;
+  if (!current) return null;
+  try {
+    return await current.getIdToken();
+  } catch (err) {
+    console.error('Failed to acquire ID token:', err);
+    return null;
+  }
+}
+
+// Fetch wrapper that attaches the caller's Firebase ID token.
+export async function authedFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const token = await getIdToken();
+  const headers = new Headers(init.headers);
+  headers.set('Content-Type', 'application/json');
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return fetch(input, { ...init, headers });
+}
+
 // Firestore operations isolated strictly to /users/{userId}/interactions/{interactionId}
 export function getInteractionsCollectionRef(userId: string) {
   if (!userId) throw new Error('Cannot access interactions without a valid userId.');

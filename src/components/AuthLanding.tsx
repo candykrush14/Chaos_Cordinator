@@ -15,7 +15,7 @@ export const AuthLanding: React.FC<AuthLandingProps> = ({
   onClearError,
 }) => {
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
+    <div className="flex min-h-[calc(100dvh-4rem)] flex-col items-center justify-center px-4 py-12 sm:px-6 lg:px-8">
       <div className="w-full max-w-xl space-y-8 text-center">
         {/* Decorative Badge */}
         <div className="inline-flex items-center gap-2 rounded-full border border-[#e5e0d8] bg-[#f5f2ed] px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-widest text-[#8c8579] shadow-xs">

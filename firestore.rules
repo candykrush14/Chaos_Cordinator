@@ -1,16 +1,57 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ----- helpers -------------------------------------------------------------
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function isStr(v, maxLen) {
+      return v is string && v.size() > 0 && v.size() <= maxLen;
+    }
+
+    function isValidLocation(loc) {
+      return loc is map
+        && loc.lat is number && loc.lat >= -90 && loc.lat <= 90
+        && loc.lng is number && loc.lng >= -180 && loc.lng <= 180
+        && isStr(loc.name, 300)
+        && (!('address' in loc) || loc.address == null || loc.address is string);
+    }
+
+    // Shape / size validation for a reflection ("interaction") document.
+    // The 1 MiB per-document Firestore limit is the hard cap; these checks stop
+    // an authenticated client from writing junk or oversized data into its own
+    // space and running up storage/read cost.
+    function isValidInteraction(d, userId) {
+      return d.userId == userId
+        && isStr(d.id, 128)
+        && isStr(d.title, 300)
+        && isStr(d.createdAt, 40)
+        && isStr(d.updatedAt, 40)
+        && d.mode in ['reflection', 'summary', 'brainstorm']
+        && d.messages is list
+        && d.messages.size() <= 400
+        && (!('location' in d) || d.location == null || isValidLocation(d.location))
+        && (!('summary' in d) || d.summary == null || d.summary is string)
+        && (!('tags' in d) || d.tags == null || d.tags is list)
+        && (!('isPinned' in d) || d.isPinned == null || d.isPinned is bool);
+    }
+
+    // ----- rules -------------------------------------------------------------
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      // The user document itself is never written by the app.
+      allow read: if isOwner(userId);
+      allow write: if false;
 
       match /interactions/{interactionId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
-
-      match /{document=**} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && isValidInteraction(request.resource.data, userId);
+        allow delete: if isOwner(userId);
       }
     }
+
+    // Everything else is denied by default (no recursive wildcard).
   }
 }

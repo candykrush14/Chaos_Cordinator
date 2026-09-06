@@ -12,7 +12,6 @@ import {
   FileText,
   MessageSquare,
   CheckCircle2,
-  ChevronRight,
   Download,
   MapPin,
 } from 'lucide-react';
@@ -21,6 +20,7 @@ import {
   getInteractionsCollectionRef,
   saveInteractionToFirestore,
   deleteInteractionFromFirestore,
+  authedFetch,
   onSnapshot,
   query,
   orderBy,
@@ -224,13 +224,12 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
     const interactionId = activeInteraction?.id || 'int-' + Date.now();
 
     try {
-      // 1. Call full-stack server endpoint with resilient model fallback
-      const response = await fetch('/api/reflect', {
+      // 1. Call full-stack server endpoint with resilient model fallback.
+      // The server derives the user from the verified ID token - never trust a
+      // client-supplied uid.
+      const response = await authedFetch('/api/reflect', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: user.uid,
-          reflectionId: interactionId,
           messages: updatedMessages.map((m) => ({
             role: m.role,
             content: m.content,
@@ -485,7 +484,7 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
   const wordCount = inputText.trim() ? inputText.trim().split(/\s+/).length : 0;
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-7xl flex-col lg:flex-row overflow-hidden bg-[#fdfbf7]">
+    <div className="mx-auto flex h-[calc(100dvh-4rem)] max-w-7xl flex-col lg:flex-row overflow-hidden bg-[#fdfbf7]">
       {/* SIDEBAR: History of past entries */}
       <aside
         id="history-sidebar"

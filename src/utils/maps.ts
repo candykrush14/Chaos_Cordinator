@@ -6,6 +6,8 @@
  * - Enforces mapId for AdvancedMarker: 'DEMO_MAP_ID'.
  */
 
+import { authedFetch } from '../firebase/config';
+
 export const GMP_ATTRIBUTION_ID = 'gmp_mcp_codeassist_v1_aistudio';
 export const GMP_MAP_ID = 'DEMO_MAP_ID';
 
@@ -413,9 +415,8 @@ export async function fetchReverseGeocodedLocation(
   lng: number
 ): Promise<{ name: string; address: string }> {
   try {
-    const response = await fetch('/api/reverse-geocode', {
+    const response = await authedFetch('/api/reverse-geocode', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ lat, lng }),
     });
 
