@@ -15,7 +15,16 @@ import {
   Download,
   MapPin,
 } from 'lucide-react';
-import type { JournalInteraction, JournalMessage, AIMode, UserProfile, JournalLocation } from '../types';
+import type {
+  JournalInteraction,
+  JournalMessage,
+  AIMode,
+  UserProfile,
+  JournalLocation,
+  ReflectionCategory,
+} from '../types';
+import { REFLECTION_CATEGORIES } from '../types';
+import { emitReflectionEvent, emitReflectionEventAndWait } from '../utils/webhooks';
 import {
   getInteractionsCollectionRef,
   saveInteractionToFirestore,
@@ -50,6 +59,7 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [inputText, setInputText] = useState('');
   const [selectedMode, setSelectedMode] = useState<AIMode>('reflection');
+  const [selectedCategory, setSelectedCategory] = useState<ReflectionCategory | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -109,6 +119,11 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeInteraction?.messages, isGenerating]);
 
+  // Keep the composer's category in sync with whichever entry is open
+  useEffect(() => {
+    setSelectedCategory(activeInteraction?.category ?? null);
+  }, [activeInteraction?.id, activeInteraction?.category]);
+
   // Filter past entries based on search query
   const filteredInteractions = interactions.filter((item) => {
     const q = searchQuery.toLowerCase().trim();
@@ -139,11 +154,13 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
         mode: selectedMode,
         messages: [],
         location: newLocation,
+        ...(selectedCategory ? { category: selectedCategory } : {}),
       };
       onSelectInteraction(newSession);
       try {
         await saveInteractionToFirestore(user.uid, newSession);
         setSaveStatus('saved');
+        emitReflectionEvent('reflection.located', interactionId);
       } catch (err: any) {
         console.error('Failed to save location to Firestore:', err);
         setSaveStatus('error');
@@ -159,6 +176,7 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
       try {
         await saveInteractionToFirestore(user.uid, updated);
         setSaveStatus('saved');
+        emitReflectionEvent('reflection.located', updated.id);
       } catch (err: any) {
         console.error('Failed to update pinned location:', err);
         setSaveStatus('error');
@@ -182,6 +200,7 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
     try {
       await saveInteractionToFirestore(user.uid, updated);
       setSaveStatus('saved');
+      emitReflectionEvent('reflection.updated', updated.id);
     } catch (err: any) {
       console.error('Failed to remove pinned location:', err);
       setSaveStatus('error');
@@ -222,6 +241,7 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
         : sanitized;
 
     const interactionId = activeInteraction?.id || 'int-' + Date.now();
+    const isNewSession = !interactions.some((item) => item.id === interactionId);
 
     try {
       // 1. Call full-stack server endpoint with resilient model fallback.
@@ -266,6 +286,7 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
         mode: selectedMode,
         messages: finalMessages,
         location: activeInteraction?.location,
+        ...(selectedCategory ? { category: selectedCategory } : {}),
       };
 
       // 2. Guaranteed Transaction Verification: Persist both user input and AI response to Firestore
@@ -276,6 +297,10 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
         // Only clear input buffer after confirmed successful write
         setInputText('');
         setFailedTurn(null);
+        emitReflectionEvent(
+          isNewSession ? 'reflection.created' : 'reflection.updated',
+          interactionId
+        );
       } catch (dbError: any) {
         console.error('Firestore save failed:', dbError);
         setSaveStatus('error');
@@ -390,6 +415,9 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
 
         // Optimistic UI update
         setInteractions((prev) => prev.filter((item) => item.id !== idToDelete));
+
+        // Notify integrations while the document still exists, then delete.
+        await emitReflectionEventAndWait('reflection.deleted', idToDelete);
 
         // Persistent Firestore deletion
         await deleteInteractionFromFirestore(user.uid, idToDelete);
@@ -896,6 +924,29 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
                 <span>•</span>
                 <span>{inputText.length}/20,000 chars</span>
               </div>
+            </div>
+
+            {/* Category */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-0.5 text-[11px] font-semibold text-[#8c8579]">Category</span>
+              {REFLECTION_CATEGORIES.map((c) => {
+                const active = selectedCategory === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    id={`category-${c.id}-btn`}
+                    onClick={() => setSelectedCategory(active ? null : c.id)}
+                    className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${
+                      active
+                        ? 'border-[#5a5a40] bg-[#5a5a40] text-white'
+                        : 'border-[#e5e0d8] bg-white text-[#8c8579] hover:border-[#5a5a40]/50 hover:text-[#3d3d3d]'
+                    }`}
+                  >
+                    {c.label}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Input Form */}

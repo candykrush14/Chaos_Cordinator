@@ -4,7 +4,10 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import * as admin from "firebase-admin";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import dotenv from "dotenv";
+import firebaseAppletConfig from "./firebase-applet-config.json";
+import { createWebhookRouter } from "./server/webhookRoutes.js";
 
 dotenv.config();
 
@@ -26,11 +29,30 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 // Credentials and the project id is auto-detected. Locally, run
 // `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS.
 let adminApp: admin.app.App | null = null;
-function getAdminAuth() {
+function getAdminApp(): admin.app.App {
   if (!adminApp) {
     adminApp = admin.apps.length ? admin.app()! : admin.initializeApp();
   }
-  return adminApp.auth();
+  return adminApp;
+}
+
+function getAdminAuth() {
+  return getAdminApp().auth();
+}
+
+// The app uses a NAMED Firestore database, not "(default)" - the server must
+// point at the same one the browser SDK does.
+const FIRESTORE_DATABASE_ID =
+  process.env.FIRESTORE_DATABASE_ID || firebaseAppletConfig.firestoreDatabaseId || "";
+
+let firestoreDb: Firestore | null = null;
+function getDb(): Firestore {
+  if (!firestoreDb) {
+    firestoreDb = FIRESTORE_DATABASE_ID
+      ? getFirestore(getAdminApp(), FIRESTORE_DATABASE_ID)
+      : getFirestore(getAdminApp());
+  }
+  return firestoreDb;
 }
 
 async function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -467,6 +489,30 @@ Keep your response warm, articulate, grounded, and free of superficial cliches o
         : error?.message || "Failed to generate reflection response.",
     });
   }
+});
+
+// Outbound notification webhooks: /api/webhooks/* and /api/events.
+// Every route behind this mount requires a verified Firebase ID token.
+app.use("/api", requireAuth, createWebhookRouter(getDb));
+
+// An unmatched /api/* request must never fall through to the SPA fallback -
+// otherwise the browser gets index.html with HTTP 200 and a confusing
+// "expected JSON" failure instead of a real status code.
+app.use("/api", (req: Request, res: Response) => {
+  res.status(404).json({
+    success: false,
+    error: `No API route for ${req.method} ${req.originalUrl}`,
+  });
+});
+
+// Any error thrown inside the webhook routes lands here rather than hanging.
+app.use("/api", (err: any, _req: Request, res: Response, _next: NextFunction) => {
+  console.error("[API] Unhandled error:", err?.message || err);
+  if (res.headersSent) return;
+  res.status(500).json({
+    success: false,
+    error: IS_PROD ? "Something went wrong." : err?.message || "Something went wrong.",
+  });
 });
 
 // Start Vite middleware in development or static serve in production

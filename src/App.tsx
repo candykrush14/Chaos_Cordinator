@@ -14,11 +14,12 @@ import { Navbar } from './components/Navbar';
 import { AuthLanding } from './components/AuthLanding';
 import { JournalDashboard } from './components/JournalDashboard';
 import { LocationsMapView } from './components/LocationsMapView';
+import { ProfileView } from './components/ProfileView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import type { UserProfile, JournalInteraction } from './types';
 import { BookOpen } from 'lucide-react';
 
-type AppView = 'journal' | 'locations';
+type AppView = 'journal' | 'locations' | 'profile';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -37,6 +38,9 @@ export default function App() {
           email: firebaseUser.email,
           displayName: firebaseUser.displayName,
           photoURL: firebaseUser.photoURL,
+          providerId: firebaseUser.providerData?.[0]?.providerId ?? null,
+          createdAt: firebaseUser.metadata?.creationTime ?? null,
+          lastSignInAt: firebaseUser.metadata?.lastSignInTime ?? null,
         });
       } else {
         setUser(null);
@@ -119,13 +123,24 @@ export default function App() {
       />
 
       {/* Keyed by view so switching tabs clears a previously caught error. */}
-      <ErrorBoundary key={view} label={view === 'locations' ? 'the map view' : 'your journal'}>
+      <ErrorBoundary
+        key={view}
+        label={
+          view === 'locations' ? 'the map view' : view === 'profile' ? 'your profile' : 'your journal'
+        }
+      >
         {!user ? (
           <AuthLanding
             onSignIn={handleSignIn}
             isLoading={isSigningIn}
             errorMessage={authError}
             onClearError={() => setAuthError(null)}
+          />
+        ) : view === 'profile' ? (
+          <ProfileView
+            user={user}
+            onSignOut={handleSignOut}
+            onBackToJournal={() => setView('journal')}
           />
         ) : view === 'locations' ? (
           <LocationsMapView

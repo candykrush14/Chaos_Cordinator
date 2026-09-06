@@ -32,6 +32,8 @@ service cloud.firestore {
         && d.mode in ['reflection', 'summary', 'brainstorm']
         && d.messages is list
         && d.messages.size() <= 400
+        && (!('category' in d) || d.category == null
+            || d.category in ['personal', 'work', 'ideas', 'gratitude', 'mindfulness'])
         && (!('location' in d) || d.location == null || isValidLocation(d.location))
         && (!('summary' in d) || d.summary == null || d.summary is string)
         && (!('tags' in d) || d.tags == null || d.tags is list)
@@ -49,6 +51,14 @@ service cloud.firestore {
         allow create, update: if isOwner(userId)
           && isValidInteraction(request.resource.data, userId);
         allow delete: if isOwner(userId);
+      }
+
+      // Outbound notification endpoints. These documents hold webhook URLs and
+      // signing secrets - bearer credentials that must never reach a browser.
+      // Only the Admin SDK touches them (it bypasses rules); clients go through
+      // the authenticated /api/webhooks routes, which return a masked preview.
+      match /webhooks/{webhookId} {
+        allow read, write: if false;
       }
     }
 

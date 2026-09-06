@@ -1,8 +1,8 @@
 import React from 'react';
-import { BookOpen, LogOut, MapPin, Plus, ShieldCheck, Sparkles } from 'lucide-react';
+import { BookOpen, LogOut, MapPin, Plus, ShieldCheck, Sparkles, User } from 'lucide-react';
 import type { UserProfile } from '../types';
 
-type AppView = 'journal' | 'locations';
+type AppView = 'journal' | 'locations' | 'profile';
 
 interface NavbarProps {
   user: UserProfile | null;
@@ -80,6 +80,21 @@ export const Navbar: React.FC<NavbarProps> = ({
               <MapPin className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Locations</span>
             </button>
+            <button
+              type="button"
+              id="nav-view-profile-btn"
+              onClick={() => onChangeView('profile')}
+              aria-pressed={view === 'profile'}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+                view === 'profile'
+                  ? 'bg-[#5a5a40] text-white shadow-xs'
+                  : 'text-[#8c8579] hover:text-[#5a5a40]'
+              }`}
+              title="Profile & integrations"
+            >
+              <User className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Profile</span>
+            </button>
           </div>
         )}
 
@@ -108,7 +123,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </p>
               </div>
 
-              <div className="w-9 h-9 rounded-full border-2 border-[#5a5a40] p-0.5 shrink-0">
+              <button
+                type="button"
+                id="nav-avatar-profile-btn"
+                onClick={() => onChangeView('profile')}
+                title="Profile & integrations"
+                className={`w-9 h-9 rounded-full border-2 p-0.5 shrink-0 cursor-pointer transition-colors ${
+                  view === 'profile' ? 'border-[#3d3d3d]' : 'border-[#5a5a40] hover:border-[#3d3d3d]'
+                }`}
+              >
                 {user.photoURL ? (
                   <img
                     src={user.photoURL}
@@ -121,7 +144,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {user.displayName ? user.displayName.slice(0, 2).toUpperCase() : 'ME'}
                   </div>
                 )}
-              </div>
+              </button>
             </div>
 
             <button

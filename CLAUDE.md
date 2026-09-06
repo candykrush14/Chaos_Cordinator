@@ -8,7 +8,7 @@ Use **npm** (Node v22). A `bun.lock` is committed but `bun` is not installed her
 
 | Task | Command |
 | --- | --- |
-| Dev server (API + SPA on `http://localhost:3000`) | `npm run dev` |
+| Dev server (API + SPA on `http://localhost:3000`) | `npm run dev` (`tsx watch` — restarts on `server.ts`/`server/*` changes) |
 | Type-check (the only automated check — acts as lint/CI) | `npm run lint` (`tsc --noEmit`) |
 | Production build | `npm run build` (Vite build + esbuild bundles `server.ts` → `dist/server.cjs`) |
 | Run production build | `npm start` (`node dist/server.cjs`, sets `NODE_ENV=production`) |
@@ -30,6 +30,19 @@ Single-process full-stack app. `server.ts` (Express) serves **both** the JSON AP
 - **Firebase Auth** (Google popup, client-only) in `src/firebase/config.ts`, which is the single Firebase module: it initializes the app/auth/Firestore and re-exports every Firestore helper the app uses. `firebase-applet-config.json` is a committed public web config (intentional, not a leak).
 - **Firestore**, per-user isolated at `/users/{uid}/interactions/{interactionId}`. One document per reflection session holding the whole `messages` array; every turn does a full-document `setDoc(..., { merge: true })`. `JournalDashboard` holds a live `onSnapshot` subscription for the history sidebar. `firestore.rules` enforces ownership **and** validates document shape/size on write. The app uses a **named** Firestore database (`firestoreDatabaseId` in `firebase-applet-config.json`), so `firebase.json` pins `firestore.database` to it — `firebase deploy --only firestore:rules` would otherwise target `(default)`.
 - `src/types.ts` is the shared domain model (`JournalInteraction`, `JournalMessage`, `JournalLocation`, `AIMode`, `UserProfile`).
+
+**Gotcha:** `server.ts` route changes need a server restart. Before `tsx watch` was added, a stale dev server would 404 new `/api/*` routes past Express into Vite's SPA fallback, returning `index.html` with HTTP 200. There is now an `/api` catch-all that returns JSON 404 instead, and every async route handler is wrapped (Express 4 does not catch async rejections — they become unhandled rejections that kill the process).
+
+### Profile & outbound notifications
+`App.tsx`'s `view` state also covers `profile`, which renders `ProfileView` (tabs: **Account**, **Integrations**). Account shows the Firebase identity + sign-out; Integrations manages webhook endpoints.
+
+Webhooks live entirely server-side under `server/`:
+- `webhookSecurity.ts` — SSRF guard. https-only, no inline credentials, port 443 only; **host+path allowlist** for Discord/Slack; for generic endpoints it rejects IP literals/internal suffixes and DNS-resolves before *every* delivery, blocking RFC1918, loopback, CGNAT, multicast, IPv6 ULA/link-local, IPv4-mapped, and `169.254.0.0/16` (the Cloud Run metadata server). Also `maskWebhookUrl`.
+- `webhookPayloads.ts` — one canonical envelope + Discord embed / Slack Block Kit / generic adapters. Strips `@everyone`-style mention injection and sends Discord `allowed_mentions: {parse: []}`.
+- `webhookDelivery.ts` — HMAC-SHA256 signing for generic endpoints, `redirect: "error"`, 6s timeout, ≤3 attempts, retries only 5xx/408/429.
+- `webhookRoutes.ts` — `/api/webhooks` CRUD + `/test`, and `/api/events`.
+
+Key invariants: webhook docs at `/users/{uid}/webhooks/{id}` are **`allow read, write: if false`** in rules (Admin SDK only) — the browser never sees a raw URL or signing secret, only `urlPreview`. `/api/events` takes just an event type + reflection id and **re-reads the document from Firestore** so a client can never dictate what gets posted externally. `JournalDashboard` emits fire-and-forget, except `reflection.deleted` which is awaited *before* the Firestore delete. See the Notification API Directive in `AGENTS.md`.
 
 ### Maps UI
 `LocationPickerModal` branches at runtime on `hasGoogleMapsApiKey()`:

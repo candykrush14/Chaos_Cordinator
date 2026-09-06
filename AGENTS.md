@@ -44,10 +44,77 @@ Provide strict, actionable architectural and security guidelines for implementin
 
 ---
 
-## 2. Agentic Threat Modeling
+## 2. Notification API Directive
+
+### Objective
+Govern outbound notifications (Discord / Slack / generic HTTPS webhooks) so that user-supplied
+delivery targets can never become an SSRF primitive, a credential leak, or a privacy surprise.
+
+### Credential Handling
+* **Webhook URLs are bearer credentials.** Anyone holding a Discord/Slack webhook URL can post to
+  that channel. Treat them exactly like API keys.
+* **Never return a stored webhook URL or signing secret to a browser.** Read paths return a masked
+  preview only (`https://host/…abcd`). Editing requires re-entering the URL.
+* **Never log a full webhook URL**, and never put one in an error message, analytics event, or
+  exception payload. Log the endpoint id instead.
+* Webhook documents live in Firestore under `/users/{uid}/webhooks/{id}` with rules set to
+  `allow read, write: if false` — only the Admin SDK writes them. All client mutation goes through
+  authenticated `/api/webhooks` routes.
+* Per-endpoint signing secrets are generated server-side (`whsec_…`), shown to the user exactly
+  once at creation, and never re-displayed.
+
+### SSRF Controls (mandatory for every user-supplied URL)
+* **https only.** Reject `http:`, non-443 ports, and URLs carrying inline credentials.
+* **Allowlist known providers.** Discord and Slack destinations must match a pinned host list and
+  path prefix (`/api/webhooks/`, `/services/`). This removes the SSRF surface for the common case.
+* **Generic endpoints:** reject raw IP literals, `localhost`, and `.local` / `.internal` /
+  `.lan` / `.home.arpa` / `.cluster.local` suffixes; require a fully-qualified public hostname.
+* **Resolve and screen before every delivery**, not just at save time. Reject if any DNS answer
+  falls in a private or reserved range — RFC1918, loopback, CGNAT, multicast, and especially
+  `169.254.0.0/16` (the cloud metadata server, which on Cloud Run can hand out service-account
+  tokens). Screen IPv6 too, including IPv4-mapped `::ffff:` addresses.
+* **Never follow redirects** (`redirect: "error"`) — a 302 is an SSRF escape hatch around every
+  check above.
+* Always set a request timeout and never buffer the response body.
+* Known residual risk: DNS rebinding between the resolve check and connect. The durable fix is
+  network-layer egress control (VPC egress / proxy allowlist), not application code.
+
+### Payload Schemas
+* One **canonical envelope** is the source of truth; per-destination adapters render from it:
+  `{ id, type, createdAt, data: { reflection: { id, title, category, mode, createdAt, updatedAt,
+  turnCount, excerpt, location } } }`.
+* Events are `reflection.created`, `reflection.updated`, `reflection.located`,
+  `reflection.deleted`.
+* **Minimum necessary disclosure.** Send title, category, mode, turn count, pinned location and a
+  bounded excerpt (≤280 chars) — never the full conversation, never model responses, never the
+  user's email or uid. Tell the user in the UI exactly what leaves the app.
+* **Payload data is re-read server-side from Firestore.** A browser sends only an event type and a
+  reflection id; it never dictates what gets posted to an external channel.
+* **Neutralise mention injection.** Journal text is arbitrary user input landing in a shared
+  channel: strip `@everyone` / `@here` / `<!channel>` and send Discord's
+  `allowed_mentions: { parse: [] }`.
+* Respect each platform's field limits (Discord embed title 256 / description 4096 / field 1024;
+  Slack header 150).
+
+### Authenticity & Delivery
+* Generic endpoints are signed: `X-Reflections-Signature: t=<unix>,v1=<hex HMAC-SHA256 of
+  "{t}.{body}">`, alongside `X-Reflections-Event` and `X-Reflections-Delivery`. Receivers must
+  verify with a constant-time compare and reject stale timestamps. Discord/Slack authenticate by
+  possession of the URL, so no signature is added.
+* Delivery is **best-effort and bounded**: at most 3 attempts with exponential backoff, retrying
+  only 5xx/408/429. 4xx and SSRF rejections are permanent — stop immediately.
+* Record the last delivery result (status, code, truncated error, timestamp) on the endpoint so
+  the user can see integration health.
+* **A notification failure must never disrupt journalling.** Emission is fire-and-forget from the
+  UI; the one exception is `reflection.deleted`, which is emitted (with a client-side timeout)
+  before the document is removed so the server can still read it.
+* Cap endpoints per user and rate-limit event emission per uid — every event is outbound HTTP that
+  costs money and can be abused.
+
+## 3. Agentic Threat Modeling
 * Prior to implementing new capabilities, map risks across the 5 Threat Zones: Input Surfaces, Planning & Reasoning, Tool Execution, Memory & State, and Inter-System Communication.
 
-## 3. Secure Coding Standards
+## 4. Secure Coding Standards
 * Strictly validate and sanitize input payloads (OWASP A03 / LLM02).
 * Ensure owner-bound Firestore security rules (`request.auth.uid == userId`).
 * Strip `undefined` values before Firestore writes.
