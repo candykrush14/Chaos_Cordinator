@@ -9,6 +9,7 @@ import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import dotenv from "dotenv";
 import firebaseConfig from "./firebase-applet-config.json";
 import { createWebhookRouter } from "./server/webhookRoutes.js";
+import { generateDeterministicDiscoverAnalysis } from "./server/journalAnalysis.js";
 
 dotenv.config();
 
@@ -503,87 +504,6 @@ Keep your response warm, articulate, grounded, and free of superficial cliches o
     });
   }
 });
-
-/**
- * Resilient deterministic emotional wellness synthesizer for fallback scenarios.
- * Computes meaningful sentiment heuristics, therapy guidance, happiness index, and healthy living insights.
- */
-function generateDeterministicDiscoverAnalysis(entries: any[], previousIndex: number | null) {
-  const hasEntries = Array.isArray(entries) && entries.length > 0;
-  const categories = entries.map((e) => e.category || "personal");
-  const gratitudeCount = categories.filter((c) => c === "gratitude").length;
-  const mindfulnessCount = categories.filter((c) => c === "mindfulness").length;
-  const workCount = categories.filter((c) => c === "work").length;
-
-  const baseHappiness = hasEntries ? 72 + Math.min(gratitudeCount * 4 + mindfulnessCount * 3, 18) : 70;
-  const happinessIndex = Math.min(Math.max(baseHappiness, 45), 96);
-  const delta = previousIndex !== null ? happinessIndex - previousIndex : 6;
-  const pointsAwarded = Math.max(15, (delta > 0 ? delta * 4 : 10) + (hasEntries ? 20 : 10));
-
-  return {
-    emotionGist: hasEntries
-      ? `Across your ${entries.length} recent reflections, there is a clear rhythm of deep intentionality and honest introspection. Your writing highlights a healthy desire for personal growth, balanced by moments of heartfelt gratitude and thoughtful problem-solving. Even when navigating complex topics, you maintain an underlying calm and an innate resilience.`
-      : "Welcome to Discover Me. As you begin recording reflections, this space will distill your emotional patterns, track your happiness index, and offer therapeutic guidance to elevate your daily well-being.",
-    primaryMood: gratitudeCount > 0 ? "Grateful & Grounded" : mindfulnessCount > 0 ? "Mindfully Present" : "Thoughtfully Contemplative",
-    secondaryMood: "Resilient & Curious",
-    emotions: [
-      { name: "Gratitude", score: Math.min(65 + gratitudeCount * 8, 95), color: "#10b981", tendency: "increasing", description: "Deep appreciation for meaningful life moments." },
-      { name: "Inner Calm", score: Math.min(60 + mindfulnessCount * 8, 92), color: "#3b82f6", tendency: "steady", description: "Centering breath and contemplative composure." },
-      { name: "Hope & Optimism", score: 76, color: "#f59e0b", tendency: "increasing", description: "Forward-looking orientation with constructive anticipation." },
-      { name: "Self-Compassion", score: 82, color: "#8b5cf6", tendency: "increasing", description: "Kindness and gentleness extended toward your own journey." },
-      { name: "Mental Clarity", score: workCount > 2 ? 68 : 84, color: "#06b6d4", tendency: "steady", description: "Clarity of purpose and reduced cognitive clutter." },
-    ],
-    therapyMessage: {
-      title: "Honoring Your Inner Sanctuary",
-      content: "Human emotional landscapes naturally ebb and flow like ocean tides. In your journal, your willingness to pause and articulate your lived experience is one of the most clinically proven forms of emotional regulation. Recognize that you don't have to carry every worry at once. By externalizing thoughts onto the page, you create space for healing and discernment.",
-      dailyMotivation: "Today is a clean canvas. Choose one small area to treat yourself with unconditional patience. You have navigated every challenging day of your life so far, and your strength is quieter and steadier than any passing storm.",
-      mindfulAffirmation: "I meet this day with steady breath, an open heart, and gratitude for my evolving story.",
-    },
-    happinessIndex,
-    happinessDelta: delta,
-    happinessTrend: delta >= 0 ? "improving" : "steady",
-    pointsAwarded,
-    healthyLivingPillars: [
-      {
-        id: "sleep",
-        title: "Sleep & Restorative Recovery",
-        score: Math.min(75 + mindfulnessCount * 4, 92),
-        status: "thriving",
-        insight: "Your reflective habits help release cortical tension before nocturnal rest.",
-        action: "Dim lights 30 minutes before sleep and take five slow, diaphragmatic exhalations.",
-      },
-      {
-        id: "vitality",
-        title: "Physical Vitality & Movement",
-        score: 72,
-        status: "balanced",
-        insight: "Emotional clarity allows for greater somatic energy and less chronic fatigue.",
-        action: "Take an unhurried 10-minute walk outdoors to synchronize with natural daylight.",
-      },
-      {
-        id: "mindfulness",
-        title: "Mindful Clarity & Focus",
-        score: Math.min(78 + mindfulnessCount * 5, 95),
-        status: "thriving",
-        insight: "Regular journaling cleanses working memory and reduces repetitive rumination.",
-        action: "Practice a 60-second sensory check-in: notice 3 sights, 2 sounds, and 1 physical sensation.",
-      },
-      {
-        id: "connection",
-        title: "Social Connection & Empathy",
-        score: Math.min(70 + gratitudeCount * 5, 88),
-        status: "balanced",
-        insight: "Intrapersonal awareness directly expands your capacity for warm interpersonal presence.",
-        action: "Send a warm word of appreciation or kindness to someone you cherish today.",
-      },
-    ],
-    dailyNudges: [
-      { id: "nudge-1", text: "Spend 5 mindful minutes breathing in natural sunlight", completed: false, points: 15, category: "vitality" },
-      { id: "nudge-2", text: "Identify one moment from your entries that brought you joy", completed: false, points: 15, category: "mindfulness" },
-      { id: "nudge-3", text: "Practice 10 slow exhalations to reset your nervous system", completed: false, points: 10, category: "rest" },
-    ],
-  };
-}
 
 // Discover Me Endpoint: Emotional Gist, Therapy Guidance, Happiness Index & Healthy Living
 app.post("/api/discover-me", requireAuth, async (req, res) => {

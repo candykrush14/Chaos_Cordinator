@@ -135,14 +135,19 @@ export function buildEntryPayload(
   limit = 25
 ): DiscoverEntryPayload[] {
   return interactions.slice(0, limit).map((entry) => {
-    const firstUser = entry.messages?.find(
-      (m) => m.role === 'user' && typeof m.content === 'string' && m.content.trim()
-    );
+    // Everything the user themselves wrote in this session - not just the
+    // opening line - so the analysis has real material to read. Model replies
+    // are excluded so the report reflects the user's voice, not Gemini's.
+    const ownWords = (entry.messages || [])
+      .filter((m) => m.role === 'user' && typeof m.content === 'string' && m.content.trim())
+      .map((m) => m.content.trim())
+      .join(' ');
+
     return {
       title: entry.title || 'Untitled Reflection',
       category: entry.category || 'personal',
       createdAt: entry.createdAt || entry.updatedAt || '',
-      excerpt: (firstUser?.content || '').replace(/\s+/g, ' ').trim().slice(0, 1000),
+      excerpt: ownWords.replace(/\s+/g, ' ').trim().slice(0, 1000),
       messagesCount: entry.messages?.length || 0,
     };
   });
