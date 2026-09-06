@@ -91,16 +91,17 @@ export const JournalDashboard: React.FC<JournalDashboardProps> = ({
     setLoadingHistory(true);
 
     const collectionRef = getInteractionsCollectionRef(user.uid);
-    const q = query(collectionRef, orderBy('updatedAt', 'desc'));
-
     const unsubscribe = onSnapshot(
-      q,
+      collectionRef,
       (snapshot) => {
         const list: JournalInteraction[] = [];
         snapshot.forEach((doc) => {
           const data = doc.data() as JournalInteraction;
           list.push({ ...data, id: doc.id || data.id });
         });
+        list.sort((a, b) =>
+          (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || '')
+        );
         setInteractions(list);
         setLoadingHistory(false);
       },

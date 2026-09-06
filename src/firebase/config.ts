@@ -68,24 +68,42 @@ export async function logOut(): Promise<void> {
 
 // Fresh Firebase ID token for authenticating calls to our own /api/* endpoints.
 // The SDK caches and auto-refreshes; returns null when signed out.
-export async function getIdToken(): Promise<string | null> {
+export async function getIdToken(forceRefresh = false): Promise<string | null> {
   const current = auth.currentUser;
   if (!current) return null;
   try {
-    return await current.getIdToken();
+    return await current.getIdToken(forceRefresh);
   } catch (err) {
     console.error('Failed to acquire ID token:', err);
     return null;
   }
 }
 
-// Fetch wrapper that attaches the caller's Firebase ID token.
+// Fetch wrapper that attaches the caller's Firebase ID token with automatic refresh retry on 401.
 export async function authedFetch(input: string, init: RequestInit = {}): Promise<Response> {
-  const token = await getIdToken();
+  let token = await getIdToken(false);
   const headers = new Headers(init.headers);
   headers.set('Content-Type', 'application/json');
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  return fetch(input, { ...init, headers });
+
+  let res = await fetch(input, { ...init, headers });
+
+  // If session expired or token rejected, attempt force-refreshing the token once
+  if (res.status === 401 && auth.currentUser) {
+    try {
+      token = await getIdToken(true);
+      if (token) {
+        const retryHeaders = new Headers(init.headers);
+        retryHeaders.set('Content-Type', 'application/json');
+        retryHeaders.set('Authorization', `Bearer ${token}`);
+        res = await fetch(input, { ...init, headers: retryHeaders });
+      }
+    } catch (err) {
+      console.warn('[authedFetch] Token refresh attempt failed:', err);
+    }
+  }
+
+  return res;
 }
 
 // Firestore operations isolated strictly to /users/{userId}/interactions/{interactionId}

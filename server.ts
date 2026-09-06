@@ -3,10 +3,11 @@ import type { NextFunction, Request, Response } from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import * as admin from "firebase-admin";
+import { getApps, initializeApp, type App } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import dotenv from "dotenv";
-import firebaseAppletConfig from "./firebase-applet-config.json";
+import firebaseConfig from "./firebase-applet-config.json";
 import { createWebhookRouter } from "./server/webhookRoutes.js";
 
 dotenv.config();
@@ -26,24 +27,35 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 // --- Firebase Admin: verify the caller's Firebase ID token on /api/* ----------
 // On Cloud Run the runtime service account supplies Application Default
-// Credentials and the project id is auto-detected. Locally, run
-// `gcloud auth application-default login` or set GOOGLE_APPLICATION_CREDENTIALS.
-let adminApp: admin.app.App | null = null;
-function getAdminApp(): admin.app.App {
+// Credentials. The project id is pinned explicitly (and exported to
+// GOOGLE_CLOUD_PROJECT) so local dev - and any environment where
+// auto-detection fails - still resolves the right project.
+const FIREBASE_PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || firebaseConfig.projectId;
+if (!process.env.GOOGLE_CLOUD_PROJECT && FIREBASE_PROJECT_ID) {
+  process.env.GOOGLE_CLOUD_PROJECT = FIREBASE_PROJECT_ID;
+}
+
+let adminApp: App | null = null;
+function getAdminApp(): App {
   if (!adminApp) {
-    adminApp = admin.apps.length ? admin.app()! : admin.initializeApp();
+    const apps = getApps();
+    adminApp = apps.length
+      ? apps[0]
+      : initializeApp({
+          projectId: FIREBASE_PROJECT_ID,
+        });
   }
   return adminApp;
 }
 
 function getAdminAuth() {
-  return getAdminApp().auth();
+  return getAuth(getAdminApp());
 }
 
 // The app uses a NAMED Firestore database, not "(default)" - the server must
-// point at the same one the browser SDK does.
+// point at the same one the browser SDK does. Needed by the webhook routes.
 const FIRESTORE_DATABASE_ID =
-  process.env.FIRESTORE_DATABASE_ID || firebaseAppletConfig.firestoreDatabaseId || "";
+  process.env.FIRESTORE_DATABASE_ID || firebaseConfig.firestoreDatabaseId || "";
 
 let firestoreDb: Firestore | null = null;
 function getDb(): Firestore {
